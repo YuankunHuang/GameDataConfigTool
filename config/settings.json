@@ -1,0 +1,28 @@
+{
+  "excelPath": "excels/",
+  "enumPath": "EnumTypes",
+  "outputPaths": {
+    "json": "output/json/",
+    "binary": "output/binary/",
+    "code": "output/code/"
+  },
+  "generators": {
+    "enableJson": true,
+    "enableBinary": true,
+    "enableCode": true
+  },
+  "codeGeneration": {
+    "namespace": "GameData",
+    "language": "csharp",
+    "generateEnum": true,
+    "generateLoader": true
+  },
+  "validation": {
+    "enableTypeCheck": true,
+    "enableRequiredFieldCheck": true
+  },
+  "logging": {
+    "level": "Info",
+    "outputToFile": false
+  }
+} 
