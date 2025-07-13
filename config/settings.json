@@ -7,12 +7,12 @@
     "code": "output/code/"
   },
   "generators": {
-    "enableJson": true,
+    "enableJson": false,
     "enableBinary": true,
     "enableCode": true
   },
   "codeGeneration": {
-    "namespace": "GameData",
+    "namespace": "YuankunHuang.GameDataConfigTool",
     "language": "csharp",
     "generateEnum": true,
     "generateLoader": true

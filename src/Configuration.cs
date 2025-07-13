@@ -26,7 +26,7 @@ public class ConfigurationManager
                 throw new InvalidOperationException("Config file format error");
             }
 
-            // 自动检测Unity项目环境并调整输出路径
+            // Automatically detect Unity project environment and adjust output paths
             AdjustOutputPathsForEnvironment(config);
 
             // Validate config
@@ -42,44 +42,41 @@ public class ConfigurationManager
 
     private static void AdjustOutputPathsForEnvironment(ToolConfiguration config)
     {
-        // 检测是否在Unity项目中
+        // Detect if in a Unity project
         var unityProjectRoot = FindUnityProjectRoot();
         
         if (!string.IsNullOrEmpty(unityProjectRoot))
         {
-            // 在Unity项目中，输出到Unity项目根目录下的Assets/Scripts/ConfigData
+            // In Unity project, output to Assets/Scripts/ConfigData under the Unity project root
             config.OutputPaths.Json = Path.Combine(unityProjectRoot, "Assets/Scripts/ConfigData/json/");
             config.OutputPaths.Binary = Path.Combine(unityProjectRoot, "Assets/Scripts/ConfigData/binary/");
             config.OutputPaths.Code = Path.Combine(unityProjectRoot, "Assets/Scripts/ConfigData/code/");
             
-            Console.WriteLine($"🎮 检测到Unity项目环境，输出到: {unityProjectRoot}/Assets/Scripts/ConfigData/");
         }
         else
         {
-            // 独立环境，输出到本地output目录
+            // Independent environment, output to local output directory
             config.OutputPaths.Json = "output/json/";
             config.OutputPaths.Binary = "output/binary/";
             config.OutputPaths.Code = "output/code/";
-            
-            Console.WriteLine("🛠️  独立工具环境，输出到本地 output/ 目录");
         }
     }
 
     private static string? FindUnityProjectRoot()
     {
-        // 检测当前目录或上级目录是否存在Unity项目特征
+        // Check if the current directory or its parent contains Unity project features
         var currentDir = Directory.GetCurrentDirectory();
         
-        // 检查当前目录
+        // Check current directory
         if (IsUnityProjectDirectory(currentDir))
             return currentDir;
             
-        // 检查上级目录
+        // Check parent directory
         var parentDir = Directory.GetParent(currentDir)?.FullName;
         if (!string.IsNullOrEmpty(parentDir) && IsUnityProjectDirectory(parentDir))
             return parentDir;
             
-        // 检查上上级目录
+        // Check grandparent directory
         var grandParentDir = Directory.GetParent(parentDir)?.FullName;
         if (!string.IsNullOrEmpty(grandParentDir) && IsUnityProjectDirectory(grandParentDir))
             return grandParentDir;
@@ -89,7 +86,7 @@ public class ConfigurationManager
 
     private static bool IsUnityProjectDirectory(string directory)
     {
-        // Unity项目特征：存在Assets目录和ProjectSettings目录
+        // Unity project features: Assets directory and ProjectSettings directory exist
         var assetsPath = Path.Combine(directory, "Assets");
         var projectSettingsPath = Path.Combine(directory, "ProjectSettings");
         

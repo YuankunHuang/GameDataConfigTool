@@ -9,7 +9,9 @@ public class DataValidator
     {
         var result = new ValidationResult();
         
-        Logger.Info("Starting data validation...");
+        Console.WriteLine();
+        Console.WriteLine("Start data validation...");
+        Console.WriteLine();
 
         if (config.EnableTypeCheck)
         {
@@ -25,9 +27,8 @@ public class DataValidator
         ValidateEnumReferences(data, result);
         ValidateDataIntegrity(data, result);
         ValidateFieldNames(data, result);
+        ValidateForeignKeyReferences(data, result);
 
-        Logger.Info($"Data validation complete, {result.Errors.Count} error(s) found");
-        
         return Task.FromResult(result);
     }
 
@@ -108,26 +109,13 @@ public class DataValidator
                 if (field.Type == FieldType.Enum)
                 {
                     // Try to find the corresponding enum
-                    var enumName = GetEnumNameFromField(field.Name);
+                    var enumName = field.EnumType ?? GetEnumNameFromField(field.Name);
                     var enumType = data.Enums.FirstOrDefault(e => e.Name.Equals(enumName, StringComparison.OrdinalIgnoreCase));
-                    
-                    // If not found and field name is "Type", try to find enum based on table name
-                    if (enumType == null && field.Name.ToLower() == "type")
-                    {
-                        var tableBasedEnumName = table.Name + "Type";
-                        enumType = data.Enums.FirstOrDefault(e => e.Name.Equals(tableBasedEnumName, StringComparison.OrdinalIgnoreCase));
-                        if (enumType != null)
-                        {
-                            enumName = tableBasedEnumName;
-                        }
-                    }
-                    
                     if (enumType == null)
                     {
                         result.Errors.Add($"Table {table.Name} Field {field.Name}: Enum type {enumName} is not defined");
                         continue;
                     }
-
                     // Validate enum value is in defined range
                     for (int rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
                     {
@@ -135,11 +123,23 @@ public class DataValidator
                         if (fieldIndex < row.Values.Count)
                         {
                             var value = row.Values[fieldIndex];
-                            if (!string.IsNullOrEmpty(value) && int.TryParse(value, out int enumValue))
+                            if (!string.IsNullOrEmpty(value))
                             {
-                                if (!enumType.Values.Any(v => v.Value == enumValue))
+                                int enumValue;
+                                if (int.TryParse(value, out enumValue))
                                 {
-                                    result.Errors.Add($"Table {table.Name} Row {rowIndex + 4} Col {fieldIndex + 1}: Enum value {enumValue} is not defined in {enumName}");
+                                    if (!enumType.Values.Any(v => v.Value == enumValue))
+                                    {
+                                        result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: Enum value {enumValue} is not defined in {enumName}");
+                                    }
+                                }
+                                else
+                                {
+                                    var found = enumType.Values.FirstOrDefault(ev => ev.Name.Equals(value, StringComparison.OrdinalIgnoreCase));
+                                    if (found == null)
+                                    {
+                                        result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: Enum name '{value}' is not defined in {enumName}");
+                                    }
                                 }
                             }
                         }
@@ -238,6 +238,48 @@ public class DataValidator
                 if (field.Name.Any(c => !char.IsLetterOrDigit(c) && c != '_'))
                 {
                     result.Errors.Add($"Table {table.Name} Col {i + 1}: Field name '{field.Name}' contains special characters. Only letters, digits, and underscores are recommended");
+                }
+            }
+        }
+    }
+
+    private void ValidateForeignKeyReferences(GameData data, ValidationResult result)
+    {
+        foreach (var table in data.Tables)
+        {
+            for (int fieldIndex = 0; fieldIndex < table.Fields.Count; fieldIndex++)
+            {
+                var field = table.Fields[fieldIndex];
+                if (!string.IsNullOrEmpty(field.ReferenceTable) && !string.IsNullOrEmpty(field.ReferenceField))
+                {
+                    // search for target table & field
+                    var refTable = data.Tables.FirstOrDefault(t => t.Name.Equals(field.ReferenceTable, StringComparison.OrdinalIgnoreCase));
+                    if (refTable == null)
+                    {
+                        result.Errors.Add($"Table {table.Name} Field {field.Name}: 引用的表 {field.ReferenceTable} 不存在");
+                        continue;
+                    }
+                    var refFieldIndex = refTable.Fields.FindIndex(f => f.Name.Equals(field.ReferenceField, StringComparison.OrdinalIgnoreCase));
+                    if (refFieldIndex < 0)
+                    {
+                        result.Errors.Add($"Table {table.Name} Field {field.Name}: 引用的字段 {field.ReferenceField} 在表 {field.ReferenceTable} 中不存在");
+                        continue;
+                    }
+                    // collect all referenced fields
+                    var refValues = new HashSet<string>(refTable.Rows.Select(r => refFieldIndex < r.Values.Count ? r.Values[refFieldIndex] : ""));
+                    // check all fields in the table
+                    for (int rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
+                    {
+                        var row = table.Rows[rowIndex];
+                        if (fieldIndex < row.Values.Count)
+                        {
+                            var value = row.Values[fieldIndex];
+                            if (!string.IsNullOrEmpty(value) && !refValues.Contains(value))
+                            {
+                                result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: 字段 {field.Name} 的值 '{value}' 未在 {field.ReferenceTable}.{field.ReferenceField} 中找到");
+                            }
+                        }
+                    }
                 }
             }
         }

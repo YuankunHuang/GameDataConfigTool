@@ -1,151 +1,54 @@
-# GameDataTool (Intelligent Edition)
+# GameDataConfigTool
 
-## 🎯 Tool Purpose
-This is an intelligent game data configuration tool, designed for game development teams:
-- **Designers:** Just add Excel files and click to generate data
-- **Programmers:** Auto-generate strong-typed code, ready for Unity integration
-- **Team Collaboration:** Standardized workflow, reduced communication cost
+A production-ready, cross-platform tool for managing game data in Excel and exporting to multiple formats (binary, code, etc.), with Unity-friendly output, robust data validation, and full English code/comments.
 
-## 🚀 Quick Start (Designer)
+## Features
+- Excel-based data editing and validation
+- Automatic code and binary export
+- Unity integration ready (auto-generated code and data)
+- Data validation and error reporting
+- Supports enum, DateTime, and custom field types
+- All generated code and comments are in English
+- Namespace is fully configurable via `settings.json`
+- Custom extension files are preserved in the `ext/` directory
 
-### 3 Steps to Configure Data
+## Requirements
+- .NET 6.0 SDK or newer
+- Windows, macOS, or Linux
+- Excel files in `.xlsx` format (EPPlus compatible)
 
-1. **Add Excel Files**
-   ```
-   excels/
-   ├── Character.xlsx          # Character data
-   ├── Item.xlsx              # Item data
-   └── EnumTypes/
-       ├── CharacterType.xlsx  # Character type enum
-       └── ItemType.xlsx       # Item type enum
-   ```
+## Quick Start
+1. Place your Excel files in the `excels/` directory.
+2. Configure settings in `config/settings.json` (including your preferred namespace).
+3. **Run the tool:**
+   - On Windows: Double-click `build.bat` or run `build.bat` in a terminal.
+   - On Mac/Linux: Run `sh build.sh` in a terminal.
+   - Or, run directly with .NET:
+     ```sh
+     dotnet run
+     ```
+4. Find generated code in `Assets/Scripts/ConfigData/code/` and binary data in `Assets/StreamingAssets/ConfigData/` (if using Unity), or in the `output/` directory for standalone use.
+5. Custom extension files are generated and preserved in `Assets/Scripts/ConfigData/code/ext/` (or `output/code/ext/`).
+6. Integrate the generated code and data into your Unity project or other engine.
 
-2. **Fill in Data Format**
-   ```
-   | ID | Name | Type | Level | Cost |
-   |----|------|------|-------|------|
-   | int | string | enum | int | float |
-   | Character ID | Character Name | Character Type | Level | Cost |
-   | 1 | Warrior | 1 | 10 | 100.5 |
-   | 2 | Mage | 2 | 15 | 200.0 |
-   ```
+## Packaging & Distribution
+- Only include the following directories/files when sharing:
+  - `src/` (source code)
+  - `excels/` (your Excel data or samples)
+  - `config/` (settings)
+  - `guide/` (documentation)
+  - `build.bat`, `build.sh`, `GameDataTool.csproj`
+  - `ext/` (custom extension files, if any)
+- Do **not** include `bin/`, `obj/`, or Unity-specific directories unless you want to share Unity integration code.
+- All debug and validation code has been removed for production use.
 
-3. **One-Click Generation**
-   ```
-   Double-click generate.bat
-   ```
+## Documentation
+- See `guide/USAGE.md` for usage details.
+- See `guide/DESIGNER_GUIDE.md` for Excel editing tips.
+- See `guide/PROGRAMMER_GUIDE.md` for integration and extension.
 
-## 🎮 Unity Integration (Programmer)
+## License
+Add your license here (MIT, Apache, proprietary, etc).
 
-### Auto Deployment
-```bash
-# Run the deployment script
-deploy_to_unity.bat
-# Enter your Unity project path
-```
-
-### Use in Game
-```csharp
-// Initialize
-gameDataManager.Initialize();
-
-// Get data
-Character[] characters = GameDataManager.GetCharacters();
-Character warrior = GameDataManager.GetCharacter(1);
-```
-
-## 📁 Directory Structure
-
-```
-GameDataTool/
-├── config/
-│   └── settings.json          # Tool config
-├── excels/                    # Excel data files
-│   ├── Character.xlsx
-│   └── EnumTypes/
-│       └── CharacterType.xlsx
-├── src/                       # Tool source code
-├── Unity/                     # Unity-specific code
-│   └── GameDataManager.cs
-├── output/                    # Generated files
-│   ├── json/                  # JSON data files
-│   ├── binary/                # Binary data files
-│   └── code/                  # C# code files
-├── generate.bat               # One-click generation
-├── deploy_to_unity.bat        # Auto deployment
-├── DESIGNER_GUIDE.md          # Designer guide
-└── PROGRAMMER_GUIDE.md        # Programmer guide
-```
-
-## 🎯 Intelligent Environment Detection
-
-The tool automatically detects the running environment:
-
-### Standalone Environment
-- Detected: `🛠️  Standalone tool environment, output to local output/ directory`
-- Use: Testing, development, standalone use
-
-### Unity Project Environment
-- Detected: `🎮 Unity project environment detected, output to Assets/Scripts/ConfigData/`
-- Use: Direct Unity project integration
-
-## 📋 Team Workflow
-
-### Designer Workflow
-1. **Add new data:** Add Excel files to `excels/` directory
-2. **Fill in data:** Follow the required format
-3. **Generate data:** Double-click `generate.bat` to generate files
-4. **Notify programmers:** Let them know new data is available
-
-### Programmer Workflow
-1. **Receive data:** Get generated files from designers
-2. **Deploy to Unity:** Run `deploy_to_unity.bat` for auto deployment
-3. **Integrate code:** Use `GameDataManager` in your game
-4. **Test and verify:** Ensure data loads correctly
-
-## 📋 Features
-
-- ✅ **Designer-friendly** - Simple Excel format, one-click generation
-- ✅ **Programmer-friendly** - Auto-generated strong-typed code, Unity integration
-- ✅ **Intelligent environment detection** - Standalone or Unity project
-- ✅ **Excel data parsing** - Supports data tables and enum tables
-- ✅ **Data validation** - Auto checks for completeness and type
-- ✅ **Multi-format output** - JSON, binary, C# code
-- ✅ **Unity integration** - Auto-generated Unity-ready code
-- ✅ **Cross-platform** - Windows, Mac, Linux
-- ✅ **Auto deployment** - One-click deployment to Unity project
-- ✅ **Team collaboration** - Standardized workflow, reduced communication cost
-
-## 🔧 Configuration Options
-
-Edit `config/settings.json` to adjust:
-- Output path (overridden by environment detection)
-- Output formats
-- Code namespace
-- Validation rules
-- Log level
-
-## 📖 Documentation
-
-- [Designer Guide](DESIGNER_GUIDE.md) - Excel format and usage
-- [Programmer Guide](PROGRAMMER_GUIDE.md) - Unity integration and API usage
-
-## 🎯 Team Collaboration Benefits
-
-1. **Designers:**
-   - Use familiar Excel tools
-   - Simple data format
-   - One-click generation, no coding required
-
-2. **Programmers:**
-   - Auto-generated strong-typed code
-   - Direct Unity integration
-   - Type safety, fewer runtime errors
-
-3. **Team:**
-   - Standardized data format
-   - Automated workflow
-   - Reduced communication cost
-   - Improved development efficiency
-
-The whole process is smart, efficient, and supports seamless team collaboration! 
+---
+For any issues or contributions, please contact the maintainer or open an issue in your repository. 

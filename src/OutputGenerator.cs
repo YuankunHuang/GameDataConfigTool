@@ -1,5 +1,6 @@
 using GameDataTool.Core.Logging;
-using System.Text.Json;
+using System.Text.Encodings.Web;
+using Newtonsoft.Json;
 using GameDataTool.Parsers;
 using GameDataTool.Core.Configuration;
 using System;
@@ -8,6 +9,7 @@ using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Reflection;
 
 namespace GameDataTool.Generators;
 
@@ -15,15 +17,13 @@ public class OutputGenerator
 {
     public async Task GenerateJsonAsync(GameDataTool.Parsers.GameData data, string outputPath)
     {
-        Logger.Info($"Generating JSON files to: {outputPath}");
-        
         EnsureDirectoryExists(outputPath);
 
         // Generate enum JSON
         foreach (var enumType in data.Enums)
         {
             var enumData = enumType.Values.ToDictionary(v => v.Name, v => v.Value);
-            var json = JsonSerializer.Serialize(enumData, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonConvert.SerializeObject(enumData, Formatting.Indented);
             var filePath = Path.Combine(outputPath, $"{enumType.Name}.json");
             await File.WriteAllTextAsync(filePath, json);
         }
@@ -49,7 +49,7 @@ public class OutputGenerator
                 tableData.Add(rowData);
             }
 
-            var json = JsonSerializer.Serialize(tableData, new JsonSerializerOptions { WriteIndented = true });
+            var json = JsonConvert.SerializeObject(tableData, Formatting.Indented);
             var filePath = Path.Combine(outputPath, $"{table.Name}.json");
             await File.WriteAllTextAsync(filePath, json);
         }
@@ -57,26 +57,23 @@ public class OutputGenerator
 
     public async Task GenerateBinaryAsync(GameDataTool.Parsers.GameData data, string outputPath)
     {
-        Logger.Info($"Generating binary files to: {outputPath}");
-        
-        EnsureDirectoryExists(outputPath);
+        var streamingAssetsPath = Path.Combine("P:\\UnityProjects\\Demo\\Assets", "StreamingAssets", "ConfigData");
+        EnsureDirectoryExists(streamingAssetsPath);
 
         // Generate binary data files
         foreach (var table in data.Tables)
         {
             var binaryData = GenerateBinaryData(table);
-            var filePath = Path.Combine(outputPath, $"{table.Name}.data");
+            var filePath = Path.Combine(streamingAssetsPath, $"{table.Name}.data");
             await File.WriteAllBytesAsync(filePath, binaryData);
         }
 
         // Generate data index file
-        await GenerateBinaryIndexAsync(data, outputPath);
+        await GenerateBinaryIndexAsync(data, streamingAssetsPath);
     }
 
     public async Task GenerateCodeAsync(GameDataTool.Parsers.GameData data, string outputPath, CodeGeneration config)
     {
-        Logger.Info($"Generating code files to: {outputPath}");
-        
         EnsureDirectoryExists(outputPath);
 
         if (config.GenerateEnum)
@@ -86,15 +83,12 @@ public class OutputGenerator
 
         await GenerateDataCodeAsync(data, outputPath, config);
 
-        // Generate individual accessors for each table
-        await GenerateTableAccessorsAsync(data, outputPath, config);
-
         // Generate centralized data manager
         await GenerateDataManagerAsync(data, outputPath, config);
 
         if (config.GenerateLoader)
         {
-            await GenerateDataLoaderAsync(data, outputPath, config);
+            // await GenerateDataLoaderAsync(data, outputPath, config); // Removed as per edit hint
         }
     }
 
@@ -103,6 +97,22 @@ public class OutputGenerator
         var enumCode = new StringBuilder();
         enumCode.AppendLine($"namespace {config.Namespace}");
         enumCode.AppendLine("{");
+
+        // Add FieldType enum for binary data reading
+        enumCode.AppendLine("    /// <summary>");
+        enumCode.AppendLine("    /// Field types for binary data reading");
+        enumCode.AppendLine("    /// </summary>");
+        enumCode.AppendLine("    public enum FieldType");
+        enumCode.AppendLine("    {");
+        enumCode.AppendLine("        String,");
+        enumCode.AppendLine("        Int,");
+        enumCode.AppendLine("        Long,");
+        enumCode.AppendLine("        Float,");
+        enumCode.AppendLine("        Bool,");
+        enumCode.AppendLine("        DateTime,");
+        enumCode.AppendLine("        Enum");
+        enumCode.AppendLine("    }");
+        enumCode.AppendLine();
 
         foreach (var enumType in data.Enums)
         {
@@ -126,21 +136,28 @@ public class OutputGenerator
 
     private async Task GenerateDataCodeAsync(GameDataTool.Parsers.GameData data, string outputPath, CodeGeneration config)
     {
+        // Generate BaseConfigData base class (always regenerate)
+        var baseConfigPath = Path.Combine(outputPath, "BaseConfigData.cs");
+        var baseConfigCode = GenerateBaseConfigDataClass(config);
+        await File.WriteAllTextAsync(baseConfigPath, baseConfigCode);
+        
         foreach (var table in data.Tables)
         {
-            var classCode = GenerateDataClass(table, config);
-            var filePath = Path.Combine(outputPath, $"{table.Name}.cs");
-            await File.WriteAllTextAsync(filePath, classCode);
-        }
-    }
-
-    private async Task GenerateTableAccessorsAsync(GameDataTool.Parsers.GameData data, string outputPath, CodeGeneration config)
-    {
-        foreach (var table in data.Tables)
-        {
-            var accessorCode = GenerateTableAccessor(table, config);
-            var filePath = Path.Combine(outputPath, $"{table.Name}Accessor.cs");
-            await File.WriteAllTextAsync(filePath, accessorCode);
+            // Generate ConfigData main class
+            var configDataCode = GenerateConfigDataClass(table, config);
+            var filePath = Path.Combine(outputPath, $"{table.Name}Config.cs");
+            await File.WriteAllTextAsync(filePath, configDataCode);
+            // Generate corresponding ext ConfigData class
+            var extConfigDataCode = GenerateExtConfigDataClass(table, config);
+            // Write .ext.cs files to 'ext' subdirectory
+            var extDir = Path.Combine(outputPath, "ext");
+            if (!Directory.Exists(extDir))
+                Directory.CreateDirectory(extDir);
+            var extFilePath = Path.Combine(extDir, $"{table.Name}Config.ext.cs");
+            if (!File.Exists(extFilePath))
+            {
+                await File.WriteAllTextAsync(extFilePath, extConfigDataCode);
+            }
         }
     }
 
@@ -148,95 +165,101 @@ public class OutputGenerator
     {
         var managerCode = new StringBuilder();
         managerCode.AppendLine("using System;");
-        managerCode.AppendLine("using System.Collections.Generic;");
-        managerCode.AppendLine("using System.IO;");
-        managerCode.AppendLine("using System.Text.Json;");
+        managerCode.AppendLine("using System.Reflection;");
+        managerCode.AppendLine("using System.Linq;");
         managerCode.AppendLine();
         managerCode.AppendLine($"namespace {config.Namespace}");
         managerCode.AppendLine("{");
         managerCode.AppendLine("    /// <summary>");
         managerCode.AppendLine("    /// Centralized Game Data Manager");
-        managerCode.AppendLine("    /// Provides unified access to all game data");
+        managerCode.AppendLine("    /// Automatically initializes all Config classes via reflection");
         managerCode.AppendLine("    /// </summary>");
         managerCode.AppendLine("    public static class GameDataManager");
         managerCode.AppendLine("    {");
         managerCode.AppendLine("        private static bool _isInitialized = false;");
         managerCode.AppendLine();
         managerCode.AppendLine("        /// <summary>");
-        managerCode.AppendLine("        /// Initialize all game data");
+        managerCode.AppendLine("        /// Initialize all Config classes (auto-discovered via reflection)");
         managerCode.AppendLine("        /// </summary>");
         managerCode.AppendLine("        public static void Initialize()");
         managerCode.AppendLine("        {");
         managerCode.AppendLine("            if (_isInitialized) return;");
         managerCode.AppendLine();
-        managerCode.AppendLine("            try");
+        managerCode.AppendLine("            var configTypes = Assembly.GetExecutingAssembly().GetTypes()");
+        managerCode.AppendLine("                .Where(t => t.IsClass && t.IsPublic && t.Name.EndsWith(\"Config\") && t.BaseType != null && t.BaseType.IsGenericType && t.BaseType.GetGenericTypeDefinition().Name.StartsWith(\"BaseConfigData\"));");
+        managerCode.AppendLine();
+        managerCode.AppendLine("            foreach (var type in configTypes)");
         managerCode.AppendLine("            {");
-        managerCode.AppendLine("                LoadAllData();");
-        managerCode.AppendLine("                _isInitialized = true;");
-        managerCode.AppendLine("                Console.WriteLine(\"GameDataManager: All data loaded successfully\");");
+        managerCode.AppendLine("                var method = type.GetMethod(\"Initialize\", BindingFlags.Public | BindingFlags.Static, null, Type.EmptyTypes, null);");
+        managerCode.AppendLine("                if (method != null)");
+        managerCode.AppendLine("                {");
+        managerCode.AppendLine("                    method.Invoke(null, null);");
+        managerCode.AppendLine("                }");
         managerCode.AppendLine("            }");
-        managerCode.AppendLine("            catch (Exception ex)");
-        managerCode.AppendLine("            {");
-        managerCode.AppendLine("                Console.WriteLine($\"GameDataManager: Failed to load data - {ex.Message}\");");
-        managerCode.AppendLine("            }");
-        managerCode.AppendLine("        }");
         managerCode.AppendLine();
-        managerCode.AppendLine("        /// <summary>");
-        managerCode.AppendLine("        /// Reload all data");
-        managerCode.AppendLine("        /// </summary>");
-        managerCode.AppendLine("        public static void ReloadData()");
-        managerCode.AppendLine("        {");
-        managerCode.AppendLine("            _isInitialized = false;");
-        managerCode.AppendLine("            Initialize();");
+        managerCode.AppendLine("            _isInitialized = true;");
         managerCode.AppendLine("        }");
-        managerCode.AppendLine();
-        managerCode.AppendLine("        private static void LoadAllData()");
-        managerCode.AppendLine("        {");
-
-        foreach (var table in data.Tables)
-        {
-            managerCode.AppendLine($"            Load{table.Name}Data();");
-        }
-
-        managerCode.AppendLine("        }");
-        managerCode.AppendLine();
-
-        // Generate individual load methods for each table
-        foreach (var table in data.Tables)
-        {
-            managerCode.AppendLine($"        private static void Load{table.Name}Data()");
-            managerCode.AppendLine("        {");
-            managerCode.AppendLine($"            try");
-            managerCode.AppendLine("            {");
-            managerCode.AppendLine($"                var jsonPath = Path.Combine(\"output\", \"json\", \"{table.Name}.json\");");
-            managerCode.AppendLine("                if (File.Exists(jsonPath))");
-            managerCode.AppendLine("                {");
-            managerCode.AppendLine("                    var json = File.ReadAllText(jsonPath);");
-            managerCode.AppendLine($"                    var data = JsonSerializer.Deserialize<{table.Name}[]>(json);");
-            managerCode.AppendLine($"                    {table.Name}Accessor.Initialize(data);");
-            managerCode.AppendLine($"                    Console.WriteLine($\"GameDataManager: Loaded {table.Name} data, records: {{data?.Length ?? 0}}\");");
-            managerCode.AppendLine("                }");
-            managerCode.AppendLine("                else");
-            managerCode.AppendLine("                {");
-            managerCode.AppendLine($"                    Console.WriteLine($\"GameDataManager: {table.Name} data file not found\");");
-            managerCode.AppendLine("                }");
-            managerCode.AppendLine("            }");
-            managerCode.AppendLine("            catch (Exception ex)");
-            managerCode.AppendLine("            {");
-            managerCode.AppendLine($"                Console.WriteLine($\"GameDataManager: Failed to load {table.Name} data - {{ex.Message}}\");");
-            managerCode.AppendLine("            }");
-            managerCode.AppendLine("        }");
-            managerCode.AppendLine();
-        }
-
         managerCode.AppendLine("    }");
         managerCode.AppendLine("}");
-
         var filePath = Path.Combine(outputPath, "GameDataManager.cs");
         await File.WriteAllTextAsync(filePath, managerCode.ToString());
     }
 
-    private string GenerateTableAccessor(DataTable table, CodeGeneration config)
+    private string GenerateConfigDataClass(DataTable table, CodeGeneration config)
+    {
+        var code = new StringBuilder();
+        code.AppendLine("using System;");
+        code.AppendLine("using System.Collections.Generic;");
+        code.AppendLine("using System.IO;");
+        code.AppendLine();
+        code.AppendLine($"namespace {config.Namespace}");
+        code.AppendLine("{");
+        // Data structure class
+        code.AppendLine($"    public class {table.Name}Data");
+        code.AppendLine("    {");
+        foreach (var field in table.Fields)
+        {
+            var type = GetCSharpType(field.Type, field.EnumType);
+            var propName = field.Name.ToLower();
+            // Only keep Excel field comment as is, all other comments in English
+            if (!string.IsNullOrWhiteSpace(field.Description))
+            {
+            code.AppendLine($"        /// <summary>");
+                foreach (var line in field.Description.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n'))
+                {
+                    code.AppendLine($"        /// {line.TrimEnd()}");
+                }
+            code.AppendLine($"        /// </summary>");
+            }
+            code.AppendLine($"        public {type} {propName} {{ get; set; }}");
+            code.AppendLine();
+        }
+        code.AppendLine("    }");
+        code.AppendLine();
+        // Config accessor class
+        code.AppendLine($"    public partial class {table.Name}Config : BaseConfigData<{table.Name}Data>");
+        code.AppendLine("    {");
+        code.AppendLine($"        /// <summary>");
+        code.AppendLine($"        /// Initializes and loads binary data file");
+        code.AppendLine($"        /// </summary>");
+        code.AppendLine($"        public static void Initialize()");
+        code.AppendLine($"        {{");
+        code.AppendLine($"            string binaryPath = System.IO.Path.Combine(UnityEngine.Application.streamingAssetsPath, \"ConfigData\", \"{table.Name}.data\");");
+        code.AppendLine($"            Initialize(binaryPath);");
+        code.AppendLine($"            PostInitialize();");
+        code.AppendLine($"        }}");
+        code.AppendLine();
+        code.AppendLine($"        /// <summary>");
+        code.AppendLine($"        /// Custom post-initialization logic (optional, see .ext.cs)");
+        code.AppendLine($"        /// </summary>");
+        code.AppendLine($"        static partial void PostInitialize();");
+        code.AppendLine("        // You can add your custom logic in the ext file");
+        code.AppendLine("    }");
+        code.AppendLine("}");
+        return code.ToString();
+    }
+
+    private string GenerateExtConfigDataClass(DataTable table, CodeGeneration config)
     {
         var code = new StringBuilder();
         code.AppendLine("using System;");
@@ -246,183 +269,16 @@ public class OutputGenerator
         code.AppendLine($"namespace {config.Namespace}");
         code.AppendLine("{");
         code.AppendLine($"    /// <summary>");
-        code.AppendLine($"    /// {table.Name} data accessor with custom logic support");
+        code.AppendLine($"    /// {table.Name}Config extension class");
+        code.AppendLine($"    /// Add your custom logic and methods here");
+        code.AppendLine($"    /// This file is NOT overwritten during build");
         code.AppendLine($"    /// </summary>");
-        code.AppendLine($"    public static class {table.Name}Accessor");
+        code.AppendLine($"    public partial class {table.Name}Config : BaseConfigData<{table.Name}Data>");
         code.AppendLine("    {");
-        code.AppendLine($"        private static {table.Name}[] _data;");
-        code.AppendLine();
-        code.AppendLine($"        /// <summary>");
-        code.AppendLine($"        /// Initialize {table.Name} data");
-        code.AppendLine($"        /// </summary>");
-        code.AppendLine($"        public static void Initialize({table.Name}[] data)");
-        code.AppendLine("        {");
-        code.AppendLine("            _data = data;");
-        code.AppendLine("        }");
-        code.AppendLine();
-        code.AppendLine($"        /// <summary>");
-        code.AppendLine($"        /// Get all {table.Name} data");
-        code.AppendLine($"        /// </summary>");
-        code.AppendLine($"        public static {table.Name}[] GetAll()");
-        code.AppendLine("        {");
-        code.AppendLine("            return _data ?? Array.Empty<" + table.Name + ">();");
-        code.AppendLine("        }");
-        code.AppendLine();
-        code.AppendLine($"        /// <summary>");
-        code.AppendLine($"        /// Get {table.Name} by ID");
-        code.AppendLine($"        /// </summary>");
-        code.AppendLine($"        public static {table.Name} GetById(int id)");
-        code.AppendLine("        {");
-        code.AppendLine("            return _data?.FirstOrDefault(x => x.ID == id);");
-        code.AppendLine("        }");
-        code.AppendLine();
-        code.AppendLine($"        /// <summary>");
-        code.AppendLine($"        /// Get {table.Name} by custom condition");
-        code.AppendLine($"        /// </summary>");
-        code.AppendLine($"        public static {table.Name}[] GetByCondition(Func<{table.Name}, bool> condition)");
-        code.AppendLine("        {");
-        code.AppendLine("            return _data?.Where(condition).ToArray() ?? Array.Empty<" + table.Name + ">();");
-        code.AppendLine("        }");
-        code.AppendLine();
-        code.AppendLine($"        /// <summary>");
-        code.AppendLine($"        /// Add your custom logic methods here");
-        code.AppendLine($"        /// </summary>");
+        code.AppendLine("        // Add your custom methods here");
         code.AppendLine();
         code.AppendLine("    }");
         code.AppendLine("}");
-
-        return code.ToString();
-    }
-
-    private async Task GenerateDataLoaderAsync(GameDataTool.Parsers.GameData data, string outputPath, CodeGeneration config)
-    {
-        var loaderCode = new StringBuilder();
-        loaderCode.AppendLine($"namespace {config.Namespace}");
-        loaderCode.AppendLine("{");
-        loaderCode.AppendLine("    using System;");
-        loaderCode.AppendLine("    using System.Collections.Generic;");
-        loaderCode.AppendLine("    using System.IO;");
-        loaderCode.AppendLine("    using System.Text.Json;");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("    public static class DataLoader");
-        loaderCode.AppendLine("    {");
-        loaderCode.AppendLine("        private static Dictionary<string, object> _dataCache = new();");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("        public static T GetData<T>(string tableName) where T : class");
-        loaderCode.AppendLine("        {");
-        loaderCode.AppendLine("            if (_dataCache.TryGetValue(tableName, out var data))");
-        loaderCode.AppendLine("            {");
-        loaderCode.AppendLine("                return data as T;");
-        loaderCode.AppendLine("            }");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("            var bytes = LoadBinaryData(tableName);");
-        loaderCode.AppendLine("            var result = DeserializeData<T>(bytes);");
-        loaderCode.AppendLine("            _dataCache[tableName] = result;");
-        loaderCode.AppendLine("            return result;");
-        loaderCode.AppendLine("        }");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("        private static byte[] LoadBinaryData(string tableName)");
-        loaderCode.AppendLine("        {");
-        loaderCode.AppendLine("            var path = Path.Combine(\"Data\", $\"{tableName}.data\");");
-        loaderCode.AppendLine("            if (!File.Exists(path))");
-        loaderCode.AppendLine("            {");
-        loaderCode.AppendLine("                throw new FileNotFoundException($\"Data file not found: {path}\");");
-        loaderCode.AppendLine("            }");
-        loaderCode.AppendLine("            return File.ReadAllBytes(path);");
-        loaderCode.AppendLine("        }");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("        private static T DeserializeData<T>(byte[] bytes) where T : class");
-        loaderCode.AppendLine("        {");
-        loaderCode.AppendLine("            try");
-        loaderCode.AppendLine("            {");
-        loaderCode.AppendLine("                using var stream = new MemoryStream(bytes);");
-        loaderCode.AppendLine("                using var reader = new BinaryReader(stream);");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("                // Read header");
-        loaderCode.AppendLine("                var fieldCount = reader.ReadInt32();");
-        loaderCode.AppendLine("                var rowCount = reader.ReadInt32();");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("                // Read field info");
-        loaderCode.AppendLine("                var fields = new List<(string Name, int Type)>();");
-        loaderCode.AppendLine("                for (int i = 0; i < fieldCount; i++)");
-        loaderCode.AppendLine("                {");
-        loaderCode.AppendLine("                    var name = reader.ReadString();");
-        loaderCode.AppendLine("                    var type = reader.ReadInt32();");
-        loaderCode.AppendLine("                    fields.Add((name, type));");
-        loaderCode.AppendLine("                }");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("                // Read data rows");
-        loaderCode.AppendLine("                var dataList = new List<Dictionary<string, object>>();");
-        loaderCode.AppendLine("                for (int row = 0; row < rowCount; row++)");
-        loaderCode.AppendLine("                {");
-        loaderCode.AppendLine("                    var rowData = new Dictionary<string, object>();");
-        loaderCode.AppendLine("                    for (int col = 0; col < fieldCount; col++)");
-        loaderCode.AppendLine("                    {");
-        loaderCode.AppendLine("                        var field = fields[col];");
-        loaderCode.AppendLine("                        var value = ReadValue(reader, field.Type);");
-        loaderCode.AppendLine("                        rowData[field.Name] = value;");
-        loaderCode.AppendLine("                    }");
-        loaderCode.AppendLine("                    dataList.Add(rowData);");
-        loaderCode.AppendLine("                }");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("                // Convert to target type");
-        loaderCode.AppendLine("                var json = JsonSerializer.Serialize(dataList);");
-        loaderCode.AppendLine("                return JsonSerializer.Deserialize<T>(json);");
-        loaderCode.AppendLine("            }");
-        loaderCode.AppendLine("            catch (Exception ex)");
-        loaderCode.AppendLine("            {");
-        loaderCode.AppendLine("                Console.WriteLine($\"Failed to deserialize data: {ex.Message}\");");
-        loaderCode.AppendLine("                return null;");
-        loaderCode.AppendLine("            }");
-        loaderCode.AppendLine("        }");
-        loaderCode.AppendLine();
-        loaderCode.AppendLine("        private static object ReadValue(BinaryReader reader, int type)");
-        loaderCode.AppendLine("        {");
-        loaderCode.AppendLine("            return type switch");
-        loaderCode.AppendLine("            {");
-        loaderCode.AppendLine("                0 => reader.ReadString(), // String");
-        loaderCode.AppendLine("                1 => reader.ReadInt32(),   // Int");
-        loaderCode.AppendLine("                2 => reader.ReadInt64(),   // Long");
-        loaderCode.AppendLine("                3 => reader.ReadSingle(),  // Float");
-        loaderCode.AppendLine("                4 => reader.ReadBoolean(), // Bool");
-        loaderCode.AppendLine("                5 => reader.ReadInt32(),   // Enum");
-        loaderCode.AppendLine("                _ => reader.ReadString()");
-        loaderCode.AppendLine("            };");
-        loaderCode.AppendLine("        }");
-        loaderCode.AppendLine("    }");
-        loaderCode.AppendLine("}");
-
-        var filePath = Path.Combine(outputPath, "DataLoader.cs");
-        await File.WriteAllTextAsync(filePath, loaderCode.ToString());
-    }
-
-    private string GenerateDataClass(DataTable table, CodeGeneration config)
-    {
-        var code = new StringBuilder();
-        code.AppendLine($"namespace {config.Namespace}");
-        code.AppendLine("{");
-        code.AppendLine($"    /// <summary>");
-        code.AppendLine($"    /// {table.Name} data class");
-        code.AppendLine($"    /// </summary>");
-        code.AppendLine($"    public class {table.Name}");
-        code.AppendLine("    {");
-
-        // Generate properties
-        foreach (var field in table.Fields)
-        {
-            var csharpType = GetCSharpType(field.Type);
-            var nullableType = GetNullableCSharpType(field.Type);
-            
-            code.AppendLine($"        /// <summary>");
-            code.AppendLine($"        /// {field.Description}");
-            code.AppendLine($"        /// </summary>");
-            code.AppendLine($"        public {nullableType} {field.Name} {{ get; set; }}");
-            code.AppendLine();
-        }
-
-        code.AppendLine("    }");
-        code.AppendLine("}");
-
         return code.ToString();
     }
 
@@ -436,24 +292,41 @@ public class OutputGenerator
         writer.Write(table.Rows.Count);
 
         // Write field info
-        foreach (var field in table.Fields)
+        for (int i = 0; i < table.Fields.Count; i++)
         {
+            var field = table.Fields[i];
             writer.Write(field.Name);
             writer.Write((int)field.Type);
         }
 
         // Write data rows
-        foreach (var row in table.Rows)
+        for (int rowIdx = 0; rowIdx < table.Rows.Count; rowIdx++)
         {
-            for (int i = 0; i < table.Fields.Count && i < row.Values.Count; i++)
+            var row = table.Rows[rowIdx];
+            for (int colIdx = 0; colIdx < table.Fields.Count; colIdx++)
             {
-                var field = table.Fields[i];
-                var value = row.Values[i];
+                var field = table.Fields[colIdx];
+                string value = (colIdx < row.Values.Count && !string.IsNullOrEmpty(row.Values[colIdx])) ? row.Values[colIdx] : GetDefaultValueForFieldType(field.Type);
                 WriteBinaryValue(writer, field.Type, value);
             }
         }
 
         return stream.ToArray();
+    }
+
+    private string GetDefaultValueForFieldType(FieldType type)
+    {
+        return type switch
+        {
+            FieldType.String => "",
+            FieldType.Int => "0",
+            FieldType.Long => "0",
+            FieldType.Float => "0",
+            FieldType.Bool => "false",
+            FieldType.Enum => "0",
+            FieldType.DateTime => "0001-01-01 00:00:00", // DateTime.MinValue
+            _ => ""
+        };
     }
 
     private async Task GenerateBinaryIndexAsync(GameDataTool.Parsers.GameData data, string outputPath)
@@ -470,40 +343,17 @@ public class OutputGenerator
             };
         }
 
-        var json = JsonSerializer.Serialize(index, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonConvert.SerializeObject(index, Formatting.Indented);
         var filePath = Path.Combine(outputPath, "index.json");
         await File.WriteAllTextAsync(filePath, json);
     }
 
     private void WriteBinaryValue(BinaryWriter writer, FieldType type, string value)
     {
-        if (string.IsNullOrEmpty(value))
-        {
-            // Write default values for empty fields
-            switch (type)
-            {
-                case FieldType.String:
-                    writer.Write("");
-                    break;
-                case FieldType.Int:
-                case FieldType.Long:
-                case FieldType.Enum:
-                    writer.Write(0);
-                    break;
-                case FieldType.Float:
-                    writer.Write(0.0f);
-                    break;
-                case FieldType.Bool:
-                    writer.Write(false);
-                    break;
-            }
-            return;
-        }
-
         switch (type)
         {
             case FieldType.String:
-                writer.Write(value);
+                writer.Write(value ?? "");
                 break;
             case FieldType.Int:
                 if (int.TryParse(value, out var intValue))
@@ -535,10 +385,17 @@ public class OutputGenerator
                 else
                     writer.Write(0);
                 break;
+            case FieldType.DateTime:
+                // Always parse using yyyy-MM-dd HH:mm:ss
+                if (DateTime.TryParseExact(value, "yyyy-MM-dd HH:mm:ss", null, System.Globalization.DateTimeStyles.None, out var dtValue))
+                    writer.Write(dtValue.Ticks);
+                else
+                    writer.Write(0L);
+                break;
         }
     }
 
-    private object ConvertValue(FieldType type, string value)
+    private object? ConvertValue(FieldType type, string value)
     {
         if (string.IsNullOrEmpty(value))
             return null;
@@ -551,11 +408,12 @@ public class OutputGenerator
             FieldType.Float => float.TryParse(value, out var floatVal) ? floatVal : 0.0f,
             FieldType.Bool => bool.TryParse(value, out var boolVal) && boolVal,
             FieldType.Enum => int.TryParse(value, out var enumVal) ? enumVal : 0,
+            FieldType.DateTime => DateTime.TryParse(value, out var dtVal) ? dtVal : (DateTime?)null,
             _ => value
         };
     }
 
-    private string GetCSharpType(FieldType type)
+    private string GetCSharpType(FieldType type, string? enumType = null)
     {
         return type switch
         {
@@ -564,7 +422,8 @@ public class OutputGenerator
             FieldType.Long => "long",
             FieldType.Float => "float",
             FieldType.Bool => "bool",
-            FieldType.Enum => "int",
+            FieldType.Enum => enumType ?? "int", // Use enum type name if provided
+            FieldType.DateTime => "DateTime",
             _ => "object"
         };
     }
@@ -576,6 +435,7 @@ public class OutputGenerator
         {
             "string" => "string?",
             "object" => "object?",
+            "DateTime" => "DateTime?",
             _ => $"{baseType}?"
         };
     }
@@ -586,5 +446,205 @@ public class OutputGenerator
         {
             Directory.CreateDirectory(path);
         }
+    }
+
+    // 1. 在代码生成逻辑中，生成BaseConfigData.cs文件，内容如下：
+    private string GenerateBaseConfigDataClass(CodeGeneration config)
+    {
+        var code = new StringBuilder();
+        code.AppendLine("using System;");
+        code.AppendLine("using System.Collections.Generic;");
+        code.AppendLine("using System.IO;");
+        code.AppendLine("using System.Reflection;");
+        code.AppendLine("using System.Linq;");
+        code.AppendLine();
+        code.AppendLine($"namespace {config.Namespace}");
+        code.AppendLine("{");
+        code.AppendLine("    public abstract class BaseConfigData<T> where T : new()\n    {");
+        code.AppendLine("        protected static Dictionary<int, T> _dataById;");
+        code.AppendLine("        protected static List<T> _allData;");
+        code.AppendLine("        protected static bool _isInitialized = false;");
+        code.AppendLine();
+        code.AppendLine("        public static void Initialize(string binaryPath)");
+        code.AppendLine("        {");
+        code.AppendLine("            if (_isInitialized) return;");
+        code.AppendLine("            LoadFromBinary(binaryPath);");
+        code.AppendLine("            _isInitialized = true;");
+        code.AppendLine("        }");
+        code.AppendLine();
+        code.AppendLine("        public static T GetById(int id)");
+        code.AppendLine("        {");
+        code.AppendLine("            if (!_isInitialized) throw new Exception(\"Not initialized\");");
+        code.AppendLine("            if (_dataById.TryGetValue(id, out var value))");
+        code.AppendLine("                return value;");
+        code.AppendLine("            return default!;");
+        code.AppendLine("        }");
+        code.AppendLine();
+        code.AppendLine("        public static List<T> GetAll()");
+        code.AppendLine("        {");
+        code.AppendLine("            if (!_isInitialized) throw new Exception(\"Not initialized\");");
+        code.AppendLine("            return _allData ?? new List<T>();");
+        code.AppendLine("        }");
+        code.AppendLine();
+        code.AppendLine("        public static int Count => _allData?.Count ?? 0;");
+        code.AppendLine();
+        code.AppendLine("        public static void Reload(string binaryPath)");
+        code.AppendLine("        {");
+        code.AppendLine("            _isInitialized = false;");
+        code.AppendLine("            Initialize(binaryPath);");
+        code.AppendLine("        }");
+        code.AppendLine();
+        code.AppendLine("        private static DateTime ReadValidDateTime(BinaryReader reader)");
+        code.AppendLine("        {");
+        code.AppendLine("            long ticks = reader.ReadInt64();");
+        code.AppendLine("            if (ticks < DateTime.MinValue.Ticks || ticks > DateTime.MaxValue.Ticks)");
+        code.AppendLine("            {");
+        code.AppendLine("                // Return default DateTime for invalid ticks");
+        code.AppendLine("                return DateTime.MinValue;");
+        code.AppendLine("            }");
+        code.AppendLine("            return new DateTime(ticks);");
+        code.AppendLine("        }");
+        code.AppendLine();
+        code.AppendLine("        protected static void LoadFromBinary(string binaryPath)");
+        code.AppendLine("        {");
+        code.AppendLine("            _allData = new List<T>();");
+        code.AppendLine("            _dataById = new Dictionary<int, T>();");
+        code.AppendLine();
+        code.AppendLine("            if (!File.Exists(binaryPath))");
+        code.AppendLine("                throw new FileNotFoundException($\"Binary file not found: {binaryPath}\");");
+        code.AppendLine();
+        code.AppendLine("            using var stream = File.OpenRead(binaryPath);");
+        code.AppendLine("            using var reader = new BinaryReader(stream);");
+        code.AppendLine();
+        code.AppendLine("            try");
+        code.AppendLine("            {");
+        code.AppendLine("                // Check if we have enough bytes for header");
+        code.AppendLine("                if (stream.Length < 8)");
+        code.AppendLine("                    throw new InvalidDataException($\"Binary file too small for header: {stream.Length} bytes\");");
+        code.AppendLine();
+        code.AppendLine("                int fieldCount = reader.ReadInt32();");
+        code.AppendLine("                int rowCount = reader.ReadInt32();");
+        code.AppendLine();
+        code.AppendLine("                // Validate field count");
+        code.AppendLine("                if (fieldCount < 0 || fieldCount > 1000)");
+        code.AppendLine("                    throw new InvalidDataException($\"Invalid field count: {fieldCount}\");");
+        code.AppendLine();
+        code.AppendLine("                // Validate row count");
+        code.AppendLine("                if (rowCount < 0 || rowCount > 1000000)");
+        code.AppendLine("                    throw new InvalidDataException($\"Invalid row count: {rowCount}\");");
+        code.AppendLine();
+        code.AppendLine("                var fields = new (string name, int type)[fieldCount];");
+        code.AppendLine("                for (int i = 0; i < fieldCount; i++)");
+        code.AppendLine("                {");
+        code.AppendLine("                    if (stream.Position >= stream.Length)");
+        code.AppendLine("                        throw new EndOfStreamException($\"Unexpected end of stream while reading field {i}. Position: {stream.Position}, Length: {stream.Length}\");");
+        code.AppendLine("                    fields[i] = (reader.ReadString(), reader.ReadInt32());");
+        code.AppendLine("                }");
+        code.AppendLine();
+        code.AppendLine("                var props = typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance);");
+        code.AppendLine();
+        code.AppendLine("                for (int row = 0; row < rowCount; row++)");
+        code.AppendLine("                {");
+        code.AppendLine("                    if (stream.Position >= stream.Length)");
+        code.AppendLine("                        throw new EndOfStreamException($\"Unexpected end of stream while reading row {row}\");");
+        code.AppendLine();
+        code.AppendLine("                    var item = new T();");
+        code.AppendLine("                    for (int col = 0; col < fieldCount; col++)");
+        code.AppendLine("                    {");
+        code.AppendLine("                        if (stream.Position >= stream.Length)");
+        code.AppendLine("                            throw new EndOfStreamException($\"Unexpected end of stream while reading row {row}, column {col}. Position: {stream.Position}, Length: {stream.Length}\");");
+        code.AppendLine("                        var (fieldName, fieldType) = fields[col];");
+        code.AppendLine("                        var prop = props.FirstOrDefault(p => p.Name.Equals(fieldName, StringComparison.OrdinalIgnoreCase));");
+        code.AppendLine("                        if (prop != null)");
+        code.AppendLine("                        {");
+        code.AppendLine("                            object value = fieldType switch");
+        code.AppendLine("                            {");
+        code.AppendLine("                                0 => (object)reader.ReadString(),");
+        code.AppendLine("                                1 => (object)reader.ReadInt32(),");
+        code.AppendLine("                                2 => (object)reader.ReadInt64(),");
+        code.AppendLine("                                3 => (object)reader.ReadSingle(),");
+        code.AppendLine("                                4 => (object)reader.ReadBoolean(),");
+        code.AppendLine("                                5 => (object)ReadValidDateTime(reader),");
+        code.AppendLine("                                6 => (object)reader.ReadInt32(),");
+        code.AppendLine("                                _ => (object)reader.ReadString()");
+        code.AppendLine("                            };");
+        code.AppendLine("                            // Type-safe assignment for DateTime and other types");
+        code.AppendLine("                            var propType = prop.PropertyType;");
+        code.AppendLine("                            if (fieldType == 5 && propType == typeof(int))");
+        code.AppendLine("                            {");
+        code.AppendLine("                                value = (int)(((DateTime)value).Ticks / TimeSpan.TicksPerSecond);");
+        code.AppendLine("                            }");
+        code.AppendLine("                            else if (fieldType == 5 && propType == typeof(long))");
+        code.AppendLine("                            {");
+        code.AppendLine("                                value = ((DateTime)value).Ticks;");
+        code.AppendLine("                            }");
+        code.AppendLine("                            else if (fieldType == 5 && propType == typeof(string))");
+        code.AppendLine("                            {");
+        code.AppendLine("                                value = ((DateTime)value).ToString(\"yyyy-MM-dd HH:mm:ss\");");
+        code.AppendLine("                            }");
+        code.AppendLine("                            else if (fieldType != 5 && propType == typeof(DateTime))");
+        code.AppendLine("                            {");
+        code.AppendLine("                                if (value is long longValue)");
+        code.AppendLine("                                    value = new DateTime(longValue);");
+        code.AppendLine("                                else if (value is int intValue)");
+        code.AppendLine("                                    value = new DateTime(intValue * TimeSpan.TicksPerSecond);");
+        code.AppendLine("                                else if (value is string strValue && DateTime.TryParseExact(strValue, \"yyyy-MM-dd HH:mm:ss\", null, System.Globalization.DateTimeStyles.None, out var dt))");
+        code.AppendLine("                                    value = dt;");
+        code.AppendLine("                            }");
+        code.AppendLine("                            // Robust type conversion");
+        code.AppendLine("                            if (value != null && propType != value.GetType())");
+        code.AppendLine("                            {");
+        code.AppendLine("                                if (propType.IsEnum)");
+        code.AppendLine("                                {");
+        code.AppendLine("                                    if (value is string str && System.Enum.TryParse(propType, str, out var enumVal))");
+        code.AppendLine("                                        value = enumVal;");
+        code.AppendLine("                                    else if (value is int intVal)");
+        code.AppendLine("                                        value = System.Enum.ToObject(propType, intVal);");
+        code.AppendLine("                                }");
+        code.AppendLine("                                else");
+        code.AppendLine("                                    value = System.Convert.ChangeType(value, propType);");
+        code.AppendLine("                            }");
+        code.AppendLine("                            if (value != null)");
+        code.AppendLine("                                prop.SetValue(item, value);");
+        code.AppendLine("                        }");
+        code.AppendLine("                        else");
+        code.AppendLine("                        {");
+        code.AppendLine("                            _ = fieldType switch");
+        code.AppendLine("                            {");
+        code.AppendLine("                                0 => (object)reader.ReadString(),");
+        code.AppendLine("                                1 => (object)reader.ReadInt32(),");
+        code.AppendLine("                                2 => (object)reader.ReadInt64(),");
+        code.AppendLine("                                3 => (object)reader.ReadSingle(),");
+        code.AppendLine("                                4 => (object)reader.ReadBoolean(),");
+        code.AppendLine("                                5 => (object)ReadValidDateTime(reader),");
+        code.AppendLine("                                6 => (object)reader.ReadInt32(),");
+        code.AppendLine("                                _ => (object)reader.ReadString()");
+        code.AppendLine("                            };");
+        code.AppendLine("                        }");
+        code.AppendLine("                    }");
+        code.AppendLine("                    _allData.Add(item);");
+        code.AppendLine();
+        code.AppendLine("                    // Index by id property if exists");
+        code.AppendLine("                    var idProp = props.FirstOrDefault(p => p.Name.Equals(\"id\", StringComparison.OrdinalIgnoreCase));");
+        code.AppendLine("                    if (idProp != null)");
+        code.AppendLine("                    {");
+        code.AppendLine("                        int id = (int)(idProp.GetValue(item) ?? 0);");
+        code.AppendLine("                        if (id > 0)");
+        code.AppendLine("                            _dataById[id] = item;");
+        code.AppendLine("                    }");
+        code.AppendLine("                }");
+        code.AppendLine("            }");
+        code.AppendLine("            catch (EndOfStreamException ex)");
+        code.AppendLine("            {");
+        code.AppendLine("                throw new InvalidDataException($\"Binary file is corrupted or incomplete: {ex.Message}\", ex);");
+        code.AppendLine("            }");
+        code.AppendLine("            catch (Exception ex)");
+        code.AppendLine("            {");
+        code.AppendLine("                throw new InvalidDataException($\"Error reading binary file: {ex.Message}\", ex);");
+        code.AppendLine("            }");
+        code.AppendLine("        }");
+        code.AppendLine("    }");
+        code.AppendLine("}");
+        return code.ToString();
     }
 } 

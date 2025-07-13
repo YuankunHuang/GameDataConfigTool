@@ -20,8 +20,8 @@
   <ItemGroup>
     <PackageReference Include="ExcelDataReader" Version="3.6.0" />
     <PackageReference Include="ExcelDataReader.DataSet" Version="3.6.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.Text.Encoding.CodePages" Version="7.0.0" />
-    <PackageReference Include="System.Text.Json" Version="8.0.2" />
     <PackageReference Include="EPPlus" Version="6.2.4" />
   </ItemGroup>
 
@@ -34,7 +34,7 @@
     </None>
   </ItemGroup>
 
-  <!-- 排除Unity目录下的文件 -->
+  <!-- Exclude files under Unity folder -->
   <ItemGroup>
     <Compile Remove="Unity\**\*" />
   </ItemGroup>

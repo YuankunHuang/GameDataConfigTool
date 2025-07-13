@@ -12,6 +12,7 @@ class Program
     {
         try
         {
+            Console.WriteLine();
             Console.WriteLine("=== Game Data Tool ===");
             Console.WriteLine("A standalone game data configuration tool");
             Console.WriteLine();
@@ -26,13 +27,32 @@ class Program
             // Check for Excel files
             if (!Directory.Exists("excels") || !Directory.GetFiles("excels", "*.xlsx").Any())
             {
-                Console.WriteLine("❌ No Excel files detected. Please put valid .xlsx files in the excels/ directory and try again.");
+                Console.WriteLine("No Excel files detected. Please put valid .xlsx files in the excels/ directory and try again.");
                 return;
             }
 
-            // Create output directories
+            // Load config first to determine which directories to create
+            Console.WriteLine("Loading configuration...");
+            var config = await ConfigurationManager.LoadAsync();
+            Logger.Initialize(config.Logging.Level, config.Logging.OutputToFile);
+
+            // Create output directories based on enabled generators
             Console.WriteLine("Creating output directories...");
-            var outputDirs = new[] { "output", "output/json", "output/binary", "output/code" };
+            var outputDirs = new List<string> { "output" };
+            
+            if (config.Generators.EnableJson)
+            {
+                outputDirs.Add("output/json");
+            }
+            if (config.Generators.EnableBinary)
+            {
+                outputDirs.Add("output/binary");
+            }
+            if (config.Generators.EnableCode)
+            {
+                outputDirs.Add("output/code");
+            }
+            
             foreach (var dir in outputDirs)
             {
                 if (!Directory.Exists(dir))
@@ -41,97 +61,142 @@ class Program
                 }
             }
 
-            // Load config
-            Console.WriteLine("Loading configuration...");
-            var config = await ConfigurationManager.LoadAsync();
-            Logger.Initialize(config.Logging.Level, config.Logging.OutputToFile);
+            // Clean output directory before build
+            if (Directory.Exists("output"))
+            {
+                try
+                {
+                    // Only delete subdirectories/files except 'ext'
+                    foreach (var dir in Directory.GetDirectories("output"))
+                    {
+                        if (Path.GetFileName(dir).ToLower() != "ext")
+                            Directory.Delete(dir, true);
+                    }
+                    foreach (var file in Directory.GetFiles("output"))
+                    {
+                        File.Delete(file);
+                    }
+                    Console.WriteLine("Cleaned output directory (except ext).\n");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Failed to clean output directory: {ex.Message}");
+                }
+            }
+
+            // Clean Unity output directories (if exist)
+            string unityRoot = null;
+            try
+            {
+                // Check if running in Unity environment
+                unityRoot = Directory.GetParent(Directory.GetCurrentDirectory()).FullName;
+                var unityCode = Path.Combine(unityRoot, "Assets/Scripts/ConfigData/code");
+                if (Directory.Exists(unityCode))
+                {
+                    foreach (var dir in Directory.GetDirectories(unityCode))
+                    {
+                        if (Path.GetFileName(dir).ToLower() != "ext")
+                            Directory.Delete(dir, true);
+                    }
+                    foreach (var file in Directory.GetFiles(unityCode))
+                    {
+                        File.Delete(file);
+                    }
+                    Console.WriteLine($"Cleaned Unity code output (except ext): {unityCode}");
+                }
+            }
+            catch { /* Ignore Unity path exception */ }
+
 
             Logger.Info("Processing Excel data...");
-            Console.WriteLine("Processing Excel data...");
 
             // Parse Excel
-            Console.WriteLine("Parsing Excel files...");
             var excelParser = new ExcelParser();
             var data = await excelParser.ParseAsync(config.ExcelPath, config.EnumPath);
 
             if (data.Tables.Count == 0 && data.Enums.Count == 0)
             {
-                Console.WriteLine("⚠️  Warning: No Excel data tables or enum types found.");
+                Console.WriteLine("Warning: No Excel data tables or enum types found.");
                 Console.WriteLine("Please make sure valid .xlsx files are present in the excels/ directory.");
                 return;
             }
 
-            Console.WriteLine($"✅ Parsing complete: {data.Tables.Count} data tables, {data.Enums.Count} enum types");
-
             // Data validation
-            Console.WriteLine("Validating data...");
             var validator = new DataValidator();
             var validationResult = await validator.ValidateAsync(data, config.Validation);
             
             if (!validationResult.IsValid)
             {
-                Console.WriteLine($"⚠️  Data validation failed: {validationResult.Errors.Count} error(s)");
+                Console.WriteLine($"Data validation failed: {validationResult.Errors.Count} error(s)");
                 foreach (var error in validationResult.Errors)
                 {
                     Console.WriteLine($"  - {error}");
                 }
-                Console.WriteLine("⚠️  Continuing with generation despite validation errors...");
-                Logger.Warning("Data validation failed, but continuing with generation");
+                Logger.Error("Build terminated due to data validation errors.");
+                Environment.Exit(1);
             }
             else
             {
-                Console.WriteLine("✅ Data validation passed");
                 Logger.Info("Data validation passed");
+                Console.WriteLine();
             }
 
             // Generate output
             var generator = new OutputGenerator();
             var startTime = DateTime.Now;
 
+            Console.WriteLine($"Start generating output files...");
+            Console.WriteLine();
+
+            Console.WriteLine($"JSON generation enabled: {config.Generators.EnableJson}");
             if (config.Generators.EnableJson)
             {
-                Console.WriteLine("Generating JSON files...");
                 await generator.GenerateJsonAsync(data, config.OutputPaths.Json);
-                Console.WriteLine("✅ JSON files generated");
             }
 
             if (config.Generators.EnableBinary)
             {
-                Console.WriteLine("Generating binary files...");
                 await generator.GenerateBinaryAsync(data, config.OutputPaths.Binary);
-                Console.WriteLine("✅ Binary files generated");
             }
 
             if (config.Generators.EnableCode)
             {
-                Console.WriteLine("Generating code files...");
                 await generator.GenerateCodeAsync(data, config.OutputPaths.Code, config.CodeGeneration);
-                Console.WriteLine("✅ Code files generated");
             }
 
             var endTime = DateTime.Now;
             var duration = endTime - startTime;
 
             Console.WriteLine();
-            Console.WriteLine("🎉 All files generated successfully!");
-            Console.WriteLine($"⏱️  Total time: {duration.TotalMilliseconds:F0}ms");
+            Console.WriteLine("All files generated successfully!");
+            Console.WriteLine($"Total time: {duration.TotalMilliseconds:F0}ms");
             Console.WriteLine();
-            Console.WriteLine("📁 Output directories:");
-            Console.WriteLine($"  📄 JSON: {config.OutputPaths.Json}");
-            Console.WriteLine($"  🔢 Binary: {config.OutputPaths.Binary}");
-            Console.WriteLine($"  💻 Code: {config.OutputPaths.Code}");
+            Console.WriteLine("Output directories:");
+            if (config.Generators.EnableJson)
+            {
+                Console.WriteLine($"  JSON: {config.OutputPaths.Json}");
+            }
+            if (config.Generators.EnableBinary)
+            {
+                Console.WriteLine($"  Binary: P:\\UnityProjects\\Demo\\Assets\\StreamingAssets\\ConfigData\\");
+            }
+            if (config.Generators.EnableCode)
+            {
+                Console.WriteLine($"  Code: {config.OutputPaths.Code}");
+            }
+            Console.WriteLine();
             
             Logger.Info($"All files generated successfully! Total time: {duration.TotalMilliseconds:F0}ms");
         }
         catch (FileNotFoundException ex)
         {
-            Console.WriteLine($"❌ File not found: {ex.Message}");
+            Console.WriteLine($"File not found: {ex.Message}");
             Logger.Error($"File not found: {ex.Message}");
             Environment.Exit(1);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ An error occurred: {ex.Message}");
+            Console.WriteLine($"An error occurred: {ex.Message}");
             Logger.Error($"An error occurred: {ex.Message}");
             if (ex.InnerException != null)
             {
