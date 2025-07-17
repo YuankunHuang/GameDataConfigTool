@@ -26,10 +26,7 @@ public class ConfigurationManager
                 throw new InvalidOperationException("Config file format error");
             }
 
-            // Automatically detect Unity project environment and adjust output paths
-            AdjustOutputPathsForEnvironment(config);
-
-            // Validate config
+            // Only do config validation, do not auto adjust paths
             ValidateConfiguration(config);
 
             return config;
@@ -40,58 +37,6 @@ public class ConfigurationManager
         }
     }
 
-    private static void AdjustOutputPathsForEnvironment(ToolConfiguration config)
-    {
-        // Detect if in a Unity project
-        var unityProjectRoot = FindUnityProjectRoot();
-        
-        if (!string.IsNullOrEmpty(unityProjectRoot))
-        {
-            // In Unity project, output to Assets/Scripts/ConfigData under the Unity project root
-            config.OutputPaths.Json = Path.Combine(unityProjectRoot, "Assets/Scripts/ConfigData/json/");
-            config.OutputPaths.Binary = Path.Combine(unityProjectRoot, "Assets/Scripts/ConfigData/binary/");
-            config.OutputPaths.Code = Path.Combine(unityProjectRoot, "Assets/Scripts/ConfigData/code/");
-            
-        }
-        else
-        {
-            // Independent environment, output to local output directory
-            config.OutputPaths.Json = "output/json/";
-            config.OutputPaths.Binary = "output/binary/";
-            config.OutputPaths.Code = "output/code/";
-        }
-    }
-
-    private static string? FindUnityProjectRoot()
-    {
-        // Check if the current directory or its parent contains Unity project features
-        var currentDir = Directory.GetCurrentDirectory();
-        
-        // Check current directory
-        if (IsUnityProjectDirectory(currentDir))
-            return currentDir;
-            
-        // Check parent directory
-        var parentDir = Directory.GetParent(currentDir)?.FullName;
-        if (!string.IsNullOrEmpty(parentDir) && IsUnityProjectDirectory(parentDir))
-            return parentDir;
-            
-        // Check grandparent directory
-        var grandParentDir = Directory.GetParent(parentDir)?.FullName;
-        if (!string.IsNullOrEmpty(grandParentDir) && IsUnityProjectDirectory(grandParentDir))
-            return grandParentDir;
-            
-        return null;
-    }
-
-    private static bool IsUnityProjectDirectory(string directory)
-    {
-        // Unity project features: Assets directory and ProjectSettings directory exist
-        var assetsPath = Path.Combine(directory, "Assets");
-        var projectSettingsPath = Path.Combine(directory, "ProjectSettings");
-        
-        return Directory.Exists(assetsPath) && Directory.Exists(projectSettingsPath);
-    }
 
     private static void ValidateConfiguration(ToolConfiguration config)
     {

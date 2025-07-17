@@ -57,19 +57,18 @@ public class OutputGenerator
 
     public async Task GenerateBinaryAsync(GameDataTool.Parsers.GameData data, string outputPath)
     {
-        var streamingAssetsPath = Path.Combine("P:\\UnityProjects\\Demo\\Assets", "StreamingAssets", "ConfigData");
-        EnsureDirectoryExists(streamingAssetsPath);
+        EnsureDirectoryExists(outputPath);
 
         // Generate binary data files
         foreach (var table in data.Tables)
         {
             var binaryData = GenerateBinaryData(table);
-            var filePath = Path.Combine(streamingAssetsPath, $"{table.Name}.data");
+            var filePath = Path.Combine(outputPath, $"{table.Name}.data");
             await File.WriteAllBytesAsync(filePath, binaryData);
         }
 
         // Generate data index file
-        await GenerateBinaryIndexAsync(data, streamingAssetsPath);
+        await GenerateBinaryIndexAsync(data, outputPath);
     }
 
     public async Task GenerateCodeAsync(GameDataTool.Parsers.GameData data, string outputPath, CodeGeneration config)

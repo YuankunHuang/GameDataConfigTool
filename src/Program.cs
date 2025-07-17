@@ -31,28 +31,18 @@ class Program
                 return;
             }
 
-            // Load config first to determine which directories to create
-            Console.WriteLine("Loading configuration...");
+            // Read configuration
             var config = await ConfigurationManager.LoadAsync();
             Logger.Initialize(config.Logging.Level, config.Logging.OutputToFile);
 
-            // Create output directories based on enabled generators
+            // Generate absolute paths, support ../Assets/... style relative paths
+            string jsonOutputPath = Path.GetFullPath(config.OutputPaths.Json, Directory.GetCurrentDirectory());
+            string binaryOutputPath = Path.GetFullPath(config.OutputPaths.Binary, Directory.GetCurrentDirectory());
+            string codeOutputPath = Path.GetFullPath(config.OutputPaths.Code, Directory.GetCurrentDirectory());
+
+            // Create output directories
             Console.WriteLine("Creating output directories...");
-            var outputDirs = new List<string> { "output" };
-            
-            if (config.Generators.EnableJson)
-            {
-                outputDirs.Add("output/json");
-            }
-            if (config.Generators.EnableBinary)
-            {
-                outputDirs.Add("output/binary");
-            }
-            if (config.Generators.EnableCode)
-            {
-                outputDirs.Add("output/code");
-            }
-            
+            var outputDirs = new List<string> { jsonOutputPath, binaryOutputPath, codeOutputPath };
             foreach (var dir in outputDirs)
             {
                 if (!Directory.Exists(dir))
@@ -61,22 +51,21 @@ class Program
                 }
             }
 
-            // Clean output directory before build
-            if (Directory.Exists("output"))
+            // Clean binary output directory (keep only ext subdirectory)
+            if (Directory.Exists(binaryOutputPath))
             {
                 try
                 {
-                    // Only delete subdirectories/files except 'ext'
-                    foreach (var dir in Directory.GetDirectories("output"))
+                    foreach (var dir in Directory.GetDirectories(binaryOutputPath))
                     {
                         if (Path.GetFileName(dir).ToLower() != "ext")
                             Directory.Delete(dir, true);
                     }
-                    foreach (var file in Directory.GetFiles("output"))
+                    foreach (var file in Directory.GetFiles(binaryOutputPath))
                     {
                         File.Delete(file);
                     }
-                    Console.WriteLine("Cleaned output directory (except ext).\n");
+                    Console.WriteLine($"Cleaned output directory (except ext): {binaryOutputPath}\n");
                 }
                 catch (Exception ex)
                 {
@@ -151,17 +140,17 @@ class Program
             Console.WriteLine($"JSON generation enabled: {config.Generators.EnableJson}");
             if (config.Generators.EnableJson)
             {
-                await generator.GenerateJsonAsync(data, config.OutputPaths.Json);
+                await generator.GenerateJsonAsync(data, jsonOutputPath);
             }
 
             if (config.Generators.EnableBinary)
             {
-                await generator.GenerateBinaryAsync(data, config.OutputPaths.Binary);
+                await generator.GenerateBinaryAsync(data, binaryOutputPath);
             }
 
             if (config.Generators.EnableCode)
             {
-                await generator.GenerateCodeAsync(data, config.OutputPaths.Code, config.CodeGeneration);
+                await generator.GenerateCodeAsync(data, codeOutputPath, config.CodeGeneration);
             }
 
             var endTime = DateTime.Now;
@@ -174,15 +163,15 @@ class Program
             Console.WriteLine("Output directories:");
             if (config.Generators.EnableJson)
             {
-                Console.WriteLine($"  JSON: {config.OutputPaths.Json}");
+                Console.WriteLine($"  JSON: {jsonOutputPath}");
             }
             if (config.Generators.EnableBinary)
             {
-                Console.WriteLine($"  Binary: P:\\UnityProjects\\Demo\\Assets\\StreamingAssets\\ConfigData\\");
+                Console.WriteLine($"  Binary: {binaryOutputPath}");
             }
             if (config.Generators.EnableCode)
             {
-                Console.WriteLine($"  Code: {config.OutputPaths.Code}");
+                Console.WriteLine($"  Code: {codeOutputPath}");
             }
             Console.WriteLine();
             

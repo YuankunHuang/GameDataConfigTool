@@ -3,8 +3,8 @@
   "enumPath": "EnumTypes",
   "outputPaths": {
     "json": "output/json/",
-    "binary": "output/binary/",
-    "code": "output/code/"
+    "binary": "../Assets/StreamingAssets/ConfigData/",
+    "code": "../Assets/Scripts/ConfigData/code/"
   },
   "generators": {
     "enableJson": false,
@@ -12,7 +12,7 @@
     "enableCode": true
   },
   "codeGeneration": {
-    "namespace": "YuankunHuang.GameDataConfigTool",
+    "namespace": "YuankunHuang.Unity.GameDataConfig",
     "language": "csharp",
     "generateEnum": true,
     "generateLoader": true
