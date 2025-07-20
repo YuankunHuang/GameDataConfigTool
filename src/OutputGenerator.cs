@@ -447,7 +447,7 @@ public class OutputGenerator
         }
     }
 
-    // 1. 在代码生成逻辑中，生成BaseConfigData.cs文件，内容如下：
+    // 1. In the code generation logic, generate the BaseConfigData.cs file with the following content:
     private string GenerateBaseConfigDataClass(CodeGeneration config)
     {
         var code = new StringBuilder();

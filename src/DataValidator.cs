@@ -256,13 +256,13 @@ public class DataValidator
                     var refTable = data.Tables.FirstOrDefault(t => t.Name.Equals(field.ReferenceTable, StringComparison.OrdinalIgnoreCase));
                     if (refTable == null)
                     {
-                        result.Errors.Add($"Table {table.Name} Field {field.Name}: 引用的表 {field.ReferenceTable} 不存在");
+                        result.Errors.Add($"Table {table.Name} Field {field.Name}: Referenced table {field.ReferenceTable} does not exist");
                         continue;
                     }
                     var refFieldIndex = refTable.Fields.FindIndex(f => f.Name.Equals(field.ReferenceField, StringComparison.OrdinalIgnoreCase));
                     if (refFieldIndex < 0)
                     {
-                        result.Errors.Add($"Table {table.Name} Field {field.Name}: 引用的字段 {field.ReferenceField} 在表 {field.ReferenceTable} 中不存在");
+                        result.Errors.Add($"Table {table.Name} Field {field.Name}: Referenced field {field.ReferenceField} does not exist in table {field.ReferenceTable}");
                         continue;
                     }
                     // collect all referenced fields
@@ -276,7 +276,7 @@ public class DataValidator
                             var value = row.Values[fieldIndex];
                             if (!string.IsNullOrEmpty(value) && !refValues.Contains(value))
                             {
-                                result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: 字段 {field.Name} 的值 '{value}' 未在 {field.ReferenceTable}.{field.ReferenceField} 中找到");
+                                result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: Field {field.Name} value '{value}' not found in {field.ReferenceTable}.{field.ReferenceField}");
                             }
                         }
                     }
