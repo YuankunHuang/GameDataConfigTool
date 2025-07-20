@@ -44,6 +44,8 @@ public class DataValidator
                     var field = table.Fields[colIndex];
                     var value = row.Values[colIndex];
 
+                    // Only validate non-empty values for type checking
+                    // Empty strings are valid for string fields and should be allowed
                     if (!string.IsNullOrEmpty(value))
                     {
                         if (!ValidateFieldType(field.Type, value))
@@ -64,7 +66,7 @@ public class DataValidator
             FieldType.Long => long.TryParse(value, out _),
             FieldType.Float => float.TryParse(value, out _),
             FieldType.Bool => bool.TryParse(value, out _) || value.ToLower() is "0" or "1" or "true" or "false",
-            FieldType.String => true,
+            FieldType.String => true, // Any string value is valid, including empty strings
             FieldType.Enum => int.TryParse(value, out _),
             _ => true
         };
@@ -82,7 +84,6 @@ public class DataValidator
                     var field = table.Fields[colIndex];
                     var value = row.Values[colIndex];
 
-                    // Check required fields (assume fields containing "id" or "key" are required)
                     if (IsRequiredField(field.Name) && string.IsNullOrEmpty(value))
                     {
                         result.Errors.Add($"Table {table.Name} Row {rowIndex + 4} Col {colIndex + 1}: Required field {field.Name} is empty");
@@ -95,7 +96,7 @@ public class DataValidator
     private bool IsRequiredField(string fieldName)
     {
         var lowerName = fieldName.ToLower();
-        return lowerName.Contains("id") || lowerName.Contains("key") || lowerName.Contains("name");
+        return lowerName.Contains("id");
     }
 
     private void ValidateEnumReferences(GameData data, ValidationResult result)
@@ -274,6 +275,8 @@ public class DataValidator
                         if (fieldIndex < row.Values.Count)
                         {
                             var value = row.Values[fieldIndex];
+                            // Only validate non-empty values for foreign key references
+                            // Empty strings are valid for string fields
                             if (!string.IsNullOrEmpty(value) && !refValues.Contains(value))
                             {
                                 result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: Field {field.Name} value '{value}' not found in {field.ReferenceTable}.{field.ReferenceField}");
