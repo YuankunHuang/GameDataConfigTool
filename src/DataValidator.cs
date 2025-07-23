@@ -65,7 +65,7 @@ public class DataValidator
             FieldType.Int => int.TryParse(value, out _),
             FieldType.Long => long.TryParse(value, out _),
             FieldType.Float => float.TryParse(value, out _),
-            FieldType.Bool => bool.TryParse(value, out _) || value.ToLower() is "0" or "1" or "true" or "false",
+            FieldType.Bool => value.Trim().ToLower() is "0" or "1" or "true" or "false",
             FieldType.String => true, // Any string value is valid, including empty strings
             FieldType.Enum => int.TryParse(value, out _),
             _ => true

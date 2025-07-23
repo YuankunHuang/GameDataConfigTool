@@ -278,7 +278,7 @@ public class ExcelParser
         string? refField = null;
         string? enumType = null;
         var rawType = typeStr;
-        var lower = typeStr.ToLower();
+        var lower = typeStr.Trim().ToLowerInvariant();
         if (lower.StartsWith("enum(") && lower.EndsWith(")"))
         {
             enumType = typeStr.Substring(5, typeStr.Length - 6);

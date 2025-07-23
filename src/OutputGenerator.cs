@@ -373,10 +373,7 @@ public class OutputGenerator
                     writer.Write(0.0f);
                 break;
             case FieldType.Bool:
-                if (bool.TryParse(value, out var boolValue))
-                    writer.Write(boolValue);
-                else
-                    writer.Write(false);
+                writer.Write(ParseBool(value));
                 break;
             case FieldType.Enum:
                 if (int.TryParse(value, out var enumValue))
@@ -405,10 +402,20 @@ public class OutputGenerator
             FieldType.Int => int.TryParse(value, out var intVal) ? intVal : 0,
             FieldType.Long => long.TryParse(value, out var longVal) ? longVal : 0L,
             FieldType.Float => float.TryParse(value, out var floatVal) ? floatVal : 0.0f,
-            FieldType.Bool => bool.TryParse(value, out var boolVal) && boolVal,
+            FieldType.Bool => ParseBool(value),
             FieldType.Enum => int.TryParse(value, out var enumVal) ? enumVal : 0,
             FieldType.DateTime => DateTime.TryParse(value, out var dtVal) ? dtVal : (DateTime?)null,
             _ => value
+        };
+    }
+
+    private bool ParseBool(string value)
+    {
+        return value.Trim().ToLower() switch
+        {
+            "1" or "true" => true,
+            "0" or "false" => false,
+            _ => false
         };
     }
 
