@@ -219,7 +219,7 @@ public class OutputGenerator
         foreach (var field in table.Fields)
         {
             var type = GetCSharpType(field.Type, field.EnumType);
-            var propName = field.Name.ToLower();
+            var propName = ToPascalCase(field.Name);
             // Only keep Excel field comment as is, all other comments in English
             if (!string.IsNullOrWhiteSpace(field.Description))
             {
@@ -452,6 +452,34 @@ public class OutputGenerator
         {
             Directory.CreateDirectory(path);
         }
+    }
+
+    private string ToPascalCase(string input)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+        
+        // Handle cases with separators (underscore, hyphen, space)
+        if (input.Contains('_') || input.Contains('-') || input.Contains(' '))
+        {
+            var words = input.Split(new char[] { '_', '-', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            var result = new StringBuilder();
+            
+            foreach (var word in words)
+            {
+                if (word.Length > 0)
+                {
+                    result.Append(char.ToUpper(word[0]));
+                    if (word.Length > 1)
+                        result.Append(word.Substring(1).ToLower());
+                }
+            }
+            
+            return result.ToString();
+        }
+        
+        // Handle single word - just capitalize first letter, keep rest as is
+        return char.ToUpper(input[0]) + input.Substring(1);
     }
 
     // 1. In the code generation logic, generate the BaseConfigData.cs file with the following content:
