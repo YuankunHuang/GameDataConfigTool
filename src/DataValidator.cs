@@ -48,9 +48,10 @@ public class DataValidator
                     // Empty strings are valid for string fields and should be allowed
                     if (!string.IsNullOrEmpty(value))
                     {
-                        if (!ValidateFieldType(field.Type, value))
+                        var (isValid, errorMessage) = ValidateFieldTypeWithMessage(field, value);
+                        if (!isValid)
                         {
-                            result.Errors.Add($"Table {table.Name} Row {rowIndex + 4} Col {colIndex + 1}: Field {field.Name} value '{value}' does not match type {field.Type}");
+                            result.Errors.Add($"Table {table.Name} Row {rowIndex + 4} Col {colIndex + 1}: Field {field.Name} {errorMessage}");
                         }
                     }
                 }
@@ -58,9 +59,14 @@ public class DataValidator
         }
     }
 
-    private bool ValidateFieldType(FieldType type, string value)
+    private bool ValidateFieldType(Field field, string value)
     {
-        return type switch
+        return ValidateFieldTypeWithMessage(field, value).Item1;
+    }
+
+    private (bool isValid, string errorMessage) ValidateFieldTypeWithMessage(Field field, string value)
+    {
+        var typeValid = field.Type switch
         {
             FieldType.Int => int.TryParse(value, out _),
             FieldType.Long => long.TryParse(value, out _),
@@ -70,6 +76,28 @@ public class DataValidator
             FieldType.Enum => int.TryParse(value, out _),
             _ => true
         };
+
+        if (!typeValid)
+            return (false, $"value '{value}' does not match type {field.Type}");
+
+        // Additional range validation for int fields with range constraints
+        if (field.Type == FieldType.Int && field.RangeMin.HasValue && field.RangeMax.HasValue)
+        {
+            if (int.TryParse(value, out var intValue))
+            {
+                // Inclusive min, exclusive max
+                if (intValue < field.RangeMin.Value || intValue >= field.RangeMax.Value)
+                {
+                    return (false, $"value '{value}' is out of range [{field.RangeMin}, {field.RangeMax}) (inclusive min, exclusive max)");
+                }
+            }
+            else
+            {
+                return (false, $"value '{value}' is not a valid integer for range validation");
+            }
+        }
+
+        return (true, string.Empty);
     }
 
     private void ValidateRequiredFields(GameData data, ValidationResult result)

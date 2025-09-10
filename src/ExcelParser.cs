@@ -189,7 +189,7 @@ public class ExcelParser
             var comment = cell.Comment?.Text ?? string.Empty;
             
             // parse types and references
-            var (fieldType, rawType, refTable, refField, enumType) = ParseFieldType(typeStr);
+            var (fieldType, rawType, refTable, refField, enumType, rangeMin, rangeMax) = ParseFieldType(typeStr);
             var field = new Field
             {
                 Name = fieldName,
@@ -198,6 +198,8 @@ public class ExcelParser
                 ReferenceTable = refTable,
                 ReferenceField = refField,
                 EnumType = enumType,
+                RangeMin = rangeMin,
+                RangeMax = rangeMax,
                 Description = comment
             };
             table.Fields.Add(field);
@@ -272,17 +274,48 @@ public class ExcelParser
     }
 
     // supports complex header
-    private (FieldType, string, string?, string?, string?) ParseFieldType(string typeStr)
+    private (FieldType, string, string?, string?, string?, int?, int?) ParseFieldType(string typeStr)
     {
         string? refTable = null;
         string? refField = null;
         string? enumType = null;
+        int? rangeMin = null;
+        int? rangeMax = null;
         var rawType = typeStr;
         var lower = typeStr.Trim().ToLowerInvariant();
         if (lower.StartsWith("enum(") && lower.EndsWith(")"))
         {
             enumType = typeStr.Substring(5, typeStr.Length - 6);
-            return (FieldType.Enum, rawType, null, null, enumType);
+            return (FieldType.Enum, rawType, null, null, enumType, null, null);
+        }
+        if (lower.Contains("^range("))
+        {
+            // e.g. int^Range(0, 100)
+            var typeMain = typeStr.Split('^')[0].Trim();
+            var rangeInfo = typeStr.Substring(typeStr.IndexOf('^') + 1);
+            var rangeStart = rangeInfo.IndexOf('(');
+            var rangeEnd = rangeInfo.IndexOf(')');
+            if (rangeStart > 0 && rangeEnd > rangeStart)
+            {
+                var rangeContent = rangeInfo.Substring(rangeStart + 1, rangeEnd - rangeStart - 1);
+                var rangeParts = rangeContent.Split(',');
+                if (rangeParts.Length == 2)
+                {
+                    if (int.TryParse(rangeParts[0].Trim(), out var min) && int.TryParse(rangeParts[1].Trim(), out var max))
+                    {
+                        rangeMin = min;
+                        rangeMax = max;
+                    }
+                }
+            }
+            var fieldType = typeMain.ToLower() switch
+            {
+                "int" or "integer" => FieldType.Int,
+                "long" => FieldType.Long,
+                "float" or "double" => FieldType.Float,
+                _ => FieldType.Int // default to int for range
+            };
+            return (fieldType, rawType, null, null, null, rangeMin, rangeMax);
         }
         if (lower.Contains("^id("))
         {
@@ -306,7 +339,7 @@ public class ExcelParser
                 "datetime" or "date" => FieldType.DateTime,
                 _ => FieldType.String // default
             };
-            return (fieldType, rawType, refTable, refField, null);
+            return (fieldType, rawType, refTable, refField, null, null, null);
         }
         // normal types
         var type = lower switch
@@ -319,7 +352,7 @@ public class ExcelParser
             "datetime" or "date" => FieldType.DateTime,
             _ => FieldType.String
         };
-        return (type, rawType, null, null, null);
+        return (type, rawType, null, null, null, null, null);
     }
 
     private void ParseDataRows(DataTable table, System.Data.DataTable excelTable)
@@ -408,6 +441,8 @@ public class Field
     public string? ReferenceTable { get; set; }
     public string? ReferenceField { get; set; }
     public string? EnumType { get; set; }
+    public int? RangeMin { get; set; }
+    public int? RangeMax { get; set; }
 }
 
 public class DataRow

@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GameDataTool", "GameDataTool.csproj", "{52E44B2E-5225-E156-E588-1FC311B42335}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{52E44B2E-5225-E156-E588-1FC311B42335}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{52E44B2E-5225-E156-E588-1FC311B42335}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{52E44B2E-5225-E156-E588-1FC311B42335}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{52E44B2E-5225-E156-E588-1FC311B42335}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C2FA58BF-8D68-4CCF-84C8-2DBC7908BFE7}
+	EndGlobalSection
+EndGlobal
