@@ -37,7 +37,7 @@ A production-ready, cross-platform tool for managing game data in Excel and expo
   - `excels/` (your Excel data or samples)
   - `config/` (settings)
   - `guide/` (documentation)
-  - `build.bat`, `build.sh`, `GameDataTool.csproj`
+  - `build.bat`, `build.sh`, `GameDataConfigTool.csproj`
   - `ext/` (custom extension files, if any)
 - Do **not** include `bin/`, `obj/`, or Unity-specific directories unless you want to share Unity integration code.
 - All debug and validation code has been removed for production use.

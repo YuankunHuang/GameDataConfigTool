@@ -25,10 +25,10 @@ echo "✅ Excel files detected, starting build..."
 echo
 
 echo "🔨 Building tool..."
-dotnet build --verbosity quiet
+dotnet build GameDataConfigTool.sln --verbosity quiet
 
 echo "📊 Generating data files..."
-dotnet run --verbosity quiet
+dotnet run --project GameDataConfigTool.csproj --verbosity quiet
 
 echo
 echo "🎉 Build complete!"

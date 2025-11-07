@@ -16,7 +16,7 @@ echo Excel files detected, starting build...
 echo.
 
 REM Step 2: dotnet build
-dotnet build --verbosity minimal
+dotnet build GameDataConfigTool.sln --verbosity minimal
 if %errorlevel% neq 0 (
     echo Build failed, please check for code errors
     pause
@@ -26,7 +26,7 @@ echo Build succeeded.
 echo.
 
 REM Step 3: dotnet run
-dotnet run --verbosity minimal
+dotnet run --project GameDataConfigTool.csproj --verbosity minimal
 if %errorlevel% neq 0 (
     echo Generation failed, please check your Excel file format
     pause
