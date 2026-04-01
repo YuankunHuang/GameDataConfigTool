@@ -1,156 +1,131 @@
 # GameDataConfigTool
 
-Standalone **.NET 6** CLI that turns **Excel (.xlsx)** game design tables into **validated binary data**, optional **JSON**, and **C#** types for **Unity** (or any consumer of the same outputs). The goal is to keep authoring in spreadsheets while catching errors **before** they reach the engine—ideal for CI and for teams that do not want validation locked inside the Unity Editor.
+**.NET 6** command-line tool: **Excel (`.xlsx`) → validated outputs** — compact **binary** for runtime, optional **JSON**, and **C#** types plus a **Unity-friendly** loader pattern (`BaseConfigData<T>`, `GameDataManager`). Validation runs **before** any file is written; failure exits with a non-zero code (CI-friendly).
 
 **Author:** [Yuankun Huang](https://github.com/YuankunHuang)
 
 ---
 
-## Design philosophy
+## What it does
 
-1. **Excel as the single source of truth** — Designers work in `.xlsx`; the tool is the gate between sheets and runtime.
-2. **Fail fast** — Parse, then **validate**; generation runs only if validation passes (non-zero exit on failure).
-3. **Editor-independent pipeline** — Runs with `dotnet run` / published exe so builds and designers’ machines do not require Unity for export.
-4. **Multiple outputs from one model** — JSON for inspection and tooling, compact **binary** for runtime, **generated C#** for typed access and `GameDataManager` bootstrap.
-5. **Safe customization** — Regenerated code lives in main files; hand-written logic goes in **`ext/`** partials that are **not overwritten** once they exist.
+| Stage | Responsibility |
+|--------|------------------|
+| **Parse** | Read data tables and enum workbooks ([EPPlus](https://github.com/EPPlusSoftware/EPPlus)). |
+| **Validate** | Types, non-nullable cells, enums, foreign keys, duplicate `id`, field names. |
+| **Generate** | `*.data` + `index.json`, optional `*.json`, and C# (`Enums.cs`, `*Config.cs`, `*Data`, `BaseConfigData.cs`, `GameDataManager.cs`). |
+
+Hand-written code lives in **`ext/`** partials; those files are **not overwritten** after the first creation.
 
 ---
 
-## How it works
+## Layout & conventions
 
-```
-excels/*.xlsx  +  excels/<EnumPath>/*.xlsx
-        │
-        ▼
-   ExcelParser  ──►  GameData (tables + enums)
-        │
-        ▼
-   DataValidator (types, FKs, enums, IDs, …)
-        │
-        ├── fail ──► stderr + exit code 1
-        │
-        └── pass
-                │
-                ├── OutputGenerator → *.data + index.json  (binary)
-                ├── OutputGenerator → *.json               (optional)
-                └── OutputGenerator → Enums.cs, *Config.cs, BaseConfigData.cs, GameDataManager.cs
-```
+**Run from the repository root** so `excels/`, `config/settings.json`, and relative `outputPaths` resolve correctly.
 
-- **Data sheets**: one `.xlsx` per table in `excels/` (top level only; first worksheet used). Row 1 defines columns (see below). Data starts at row 2.
-- **Enum sheets**: under the configured enum subdirectory; columns are name / int value / optional comment (row 1 is header).
+### Workbooks
 
-### Table shape (primary key)
+- **Tables:** one `.xlsx` per table in `excels/` (top level only, **first sheet**). Row 1 = headers, row 2+ = data.
+- **Enums:** `.xlsx` files under `excels/<enumPath>/` (e.g. `excels/EnumTypes/`). Row 1 = header; columns: name, int value, optional description.
 
-- **Column A (first column) must be `id|int`**, not nullable. This lines up with generated `XXXData.Id` and runtime **`GetById`** (which indexes on the `id` property).
-- Duplicate **`id`** values are rejected at export time.
+### Primary key
 
-### Column header format
+- **Column A must be `id|int`.** It cannot use `|nullable`.
+- Duplicate **`id`** values are rejected.
+- Generated **`GetById`** indexes on the `Id` property (same convention).
+
+### Column header
 
 `FieldName|Type` or `FieldName|Type|nullable`
 
-- **Default (no flag)** — the cell is **non-nullable**: it must contain a value (after trim). Content is validated against **Type** when non-empty.
-- **`nullable`** — an empty cell is allowed; it is normalized to the **type default** before validation and binary export (`0` / `false` / `""` / **`DateTime.MinValue`** as `0001-01-01 00:00:00` for `datetime`, `0` for `enum`).
-- **Examples**: `id|int` — primary key; `name|string` — must have a value; `subtitle|string|nullable` — blank → default.
+| Part | Meaning |
+|------|---------|
+| **FieldName** | Becomes the C# property (PascalCase). |
+| **Type** | See [Type syntax](#type-syntax) below. |
+| **nullable** (optional) | Blank cells are allowed and are filled with the **type default** before validation and export (`0` / `false` / `""` / `0001-01-01 00:00:00` for `datetime` → `DateTime.MinValue`). |
 
-### Type mini-language (middle segment)
+If **`enforceNonNullableColumns`** is on in settings, any column **without** `|nullable` must have a non-empty value (after trim). Non-empty values are checked against the declared type.
+
+Header **cell comments** become **XML documentation** on the generated properties.
+
+### Type syntax
 
 | Pattern | Meaning |
-|--------|---------|
-| `int`, `long`, `float`, `string`, `bool`, `datetime` | Scalars (`date` aliases to `datetime`). Unknown spellings are **errors** (fail fast). |
-| `enum(EnumTypeName)` | Integer enum; cells may use numbers or symbolic names from the enum workbook. |
-| `int^Range(min,max)` | Range check: **inclusive min, exclusive max** (validated for `int` columns). |
-| `int^id(RefTable)` | Foreign key: value must exist in `RefTable`’s referenced id column. |
-
-Cell **comments** on the header row become **XML doc comments** on generated C# properties.
-
-**Nullable `datetime` default:** uses `DateTime.MinValue` (`0001-01-01 00:00:00`). Its ticks are inside the .NET range, so binary read/write and generated `ReadValidDateTime` do not overflow. If you need a different sentinel (e.g. for SQL `datetime` min 1753, or “unset” vs “real min date”), use a separate flag column or `int` epoch instead of relying on this default.
+|---------|---------|
+| `int`, `long`, `float`, `string`, `bool`, `datetime` | Scalars (`date` → `datetime`). Unknown names are errors. |
+| `enum(EnumTypeName)` | Integer enum; cell may be a number or an enum member name from the enum workbook. |
+| `int^Range(min,max)` | For `int`: value in **[min, max)** (inclusive min, exclusive max). |
+| `int^id(RefTable)` | Foreign key: value must exist in the **`id`** column of the data table whose workbook is named `RefTable`. |
 
 ---
 
 ## Requirements
 
 - [.NET 6 SDK](https://dotnet.microsoft.com/download/dotnet/6.0)
-- `.xlsx` files readable by **EPPlus** (see [EPPlus licensing](https://epplussoftware.com/developers/licensenotice) for commercial use).
+- [EPPlus](https://www.nuget.org/packages/EPPlus) (bundled via NuGet). **Check [licensing](https://epplussoftware.com/developers/licensenotice)** for commercial products.
 
-The `.csproj` is configured for **self-contained `win-x64`** publish by default; other platforms can adjust `RuntimeIdentifier` or publish with `-r`.
+Default publish profile targets **self-contained `win-x64`**; use `dotnet publish -r <RID>` for other platforms.
 
 ---
 
 ## Quick start
 
-1. Put table workbooks in **`excels/`** (and enum workbooks under the folder named in `enumPath`, e.g. `excels/EnumTypes/`).
-2. Edit **`config/settings.json`** — especially `outputPaths`, `codeGeneration.namespace`, and generator toggles.
-3. From the repo root:
+1. Add table `.xlsx` files under **`excels/`** and enums under **`excels/<enumPath>/`**.
+2. Adjust **`config/settings.json`** (`outputPaths`, `codeGeneration.namespace`, toggles).
+3. Execute:
 
    ```bash
    dotnet build GameDataConfigTool.sln
    dotnet run --project GameDataConfigTool.csproj
    ```
 
-   On Windows you can use **`build.bat`** (builds then runs; requires at least one `.xlsx` under `excels/`).
+   On Windows, **`build.bat`** builds and runs (expects at least one `.xlsx` in `excels/`).
 
-4. Outputs (default Unity-relative layout in sample config):
-   - **Binary**: `StreamingAssets/ConfigData/*.data` + `index.json`
-   - **Code**: `Assets/Scripts/ConfigData/code/` (+ `ext/` partials)
+4. **`dotnet run -- --help`** — CLI help.
 
-Always run from the **tool repository root** so `excels/`, `config/settings.json`, and relative `outputPaths` resolve correctly.
-
-Run with `--help` / `-h` for CLI help.
+Sample paths in `settings.json` point at a sibling Unity tree (`../Assets/...`); change them to match your project.
 
 ---
 
 ## Configuration (`config/settings.json`)
 
-| Section | Role |
-|--------|------|
-| `excelPath` / `enumPath` | Root folder for tables; enum path relative to `excelPath` unless absolute. |
-| `cleanOutputsBeforeGenerate` | When `true`, deletes previous outputs under each **enabled** output path (always keeps an `ext/` folder). |
-| `outputPaths` | `json`, `binary`, `code` (supports `../Assets/...` style paths). |
-| `generators` | Toggle JSON / binary / code generation. |
+| Key | Purpose |
+|-----|---------|
+| `excelPath` | Folder containing table workbooks (default `excels/`). |
+| `enumPath` | Subfolder under `excelPath` for enum workbooks, or an absolute path. |
+| `cleanOutputsBeforeGenerate` | If `true`, clears each **enabled** output directory before writing (always keeps an `ext/` subfolder). Default in code: `true` if omitted. |
+| `outputPaths.json` / `binary` / `code` | Output roots; may use `../` relative to the tool root. |
+| `generators` | `enableJson`, `enableBinary`, `enableCode`. |
 | `codeGeneration` | `namespace`, `language`, `generateEnum`. |
-| `validation` | `enableTypeCheck`; `enforceNonNullableColumns` — when `true`, columns **without** `|nullable` may not be left blank. |
-| `logging` | Level and optional file output under `logs/tool.log`. |
+| `validation.enableTypeCheck` | Type / range checks on non-empty cells. |
+| `validation.enforceNonNullableColumns` | Enforce non-empty cells for columns without `|nullable`. |
+| `logging` | `level`, `outputToFile`. |
 
 ---
 
-## Unity integration (generated side)
+## Unity (generated code)
 
-- **`BaseConfigData<T>`** — Loads `.data` binaries; **`GetById`** uses the **`id`** property when present (matches first-column `id|int`).
-- **`GameDataManager`** — Editor/native: discovers `*Config` types via reflection and calls `Initialize()`. WebGL player: parallel async init per table.
-- **`ext/*Config.ext.cs`** — Create once; add partial methods / helpers without losing them on the next export.
-
-Copy or point `outputPaths` at your Unity project’s `StreamingAssets` and script folders.
-
----
-
-## Repository layout
-
-| Path | Purpose |
-|------|---------|
-| `src/Program.cs` | Entry: discovery, clean, parse, validate, generate. |
-| `src/ExcelParser.cs` | EPPlus parsing, `nullable` defaults, `id|int` schema. |
-| `src/DataValidator.cs` | Type checks, non-nullable, enum, duplicate `id`, FKs, field names. |
-| `src/OutputGenerator.cs` | JSON, binary, C#, index, `GameDataManager`. |
-| `src/Configuration.cs` | `settings.json` load + validation. |
-| `src/Logger.cs` | Console/file logging. |
-| `config/settings.json` | Tool configuration. |
-| `guide/README.md` | Pointer to this file. |
+- **`XXXData`** — Row shape.
+- **`XXXConfig` : `BaseConfigData<XXXData>`** — `Initialize()` loads `StreamingAssets/ConfigData/<Table>.data`; optional **`PostInitialize`** in `ext/`.
+- **`GameDataManager`** — Calls each config’s `Initialize` (reflection on non-WebGL; async path on WebGL player).
+- Data is held in **static** collections until **`Reload`** or domain unload; there is no automatic unload API.
 
 ---
 
-## Migrating older workbooks
+## Source layout
 
-*(Only if you are upgrading from an older revision of this tool; new projects can skip this section.)*
-
-1. Put **`id|int` in column A** on every data table (no `nullable` on `id`).
-2. Replace **`|required`** with nothing (non-nullable is the default).
-3. Replace optional columns with **`|nullable`** where blanks are allowed.
-4. Remove **`|key`** — duplicate detection is always on **`id`** (column A).
-5. Unknown scalar types are **parse errors** (no silent string fallback).
-6. In `settings.json`, rename **`enableRequiredFieldCheck`** → **`enforceNonNullableColumns`** (same meaning).
+```
+src/Program.cs           Entry
+src/ExcelParser.cs       Sheets → model; defaults for nullable cells
+src/DataValidator.cs     Rules
+src/OutputGenerator.cs   Writers + C# templates
+src/Configuration.cs     Settings
+src/FieldValueDefaults.cs Shared default strings (e.g. datetime min)
+src/Logger.cs
+config/settings.json
+```
 
 ---
 
 ## License
 
-Add a `LICENSE` file at the repo root if you distribute the tool; respect **EPPlus** and third-party package licenses.
+Ship a **`LICENSE`** if you redistribute the tool. Honor **EPPlus** and other NuGet package terms.
