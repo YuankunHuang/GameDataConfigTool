@@ -1,6 +1,7 @@
 {
   "excelPath": "excels/",
   "enumPath": "EnumTypes",
+  "cleanOutputsBeforeGenerate": true,
   "outputPaths": {
     "json": "output/json/",
     "binary": "../Assets/StreamingAssets/ConfigData/",
@@ -14,12 +15,11 @@
   "codeGeneration": {
     "namespace": "YuankunHuang.Unity.GameDataConfig",
     "language": "csharp",
-    "generateEnum": true,
-    "generateLoader": true
+    "generateEnum": true
   },
   "validation": {
     "enableTypeCheck": true,
-    "enableRequiredFieldCheck": true
+    "enforceNonNullableColumns": true
   },
   "logging": {
     "level": "Info",

@@ -1,4 +1,3 @@
-using GameDataTool.Core;
 using GameDataTool.Core.Configuration;
 using GameDataTool.Core.Logging;
 using GameDataTool.Parsers;
@@ -6,7 +5,7 @@ using GameDataTool.Generators;
 
 namespace GameDataTool;
 
-class Program
+static class Program
 {
     static async Task Main(string[] args)
     {
@@ -14,204 +13,169 @@ class Program
         {
             Console.WriteLine();
             Console.WriteLine("=== Game Data Tool ===");
-            Console.WriteLine("A standalone game data configuration tool");
+            Console.WriteLine("Excel → validated binary / JSON / C# for Unity");
             Console.WriteLine();
 
-            // Show help
             if (args.Contains("--help") || args.Contains("-h"))
             {
                 ShowHelp();
                 return;
             }
 
-            // Check for Excel files
             if (!Directory.Exists("excels") || !Directory.GetFiles("excels", "*.xlsx").Any())
             {
-                Console.WriteLine("No Excel files detected. Please put valid .xlsx files in the excels/ directory and try again.");
+                Console.WriteLine("No Excel files found. Add .xlsx files under excels/ and run again.");
                 return;
             }
 
-            // Read configuration
             var config = await ConfigurationManager.LoadAsync();
             Logger.Initialize(config.Logging.Level, config.Logging.OutputToFile);
 
-            // Generate absolute paths, support ../Assets/... style relative paths
-            string jsonOutputPath = Path.GetFullPath(config.OutputPaths.Json, Directory.GetCurrentDirectory());
-            string binaryOutputPath = Path.GetFullPath(config.OutputPaths.Binary, Directory.GetCurrentDirectory());
-            string codeOutputPath = Path.GetFullPath(config.OutputPaths.Code, Directory.GetCurrentDirectory());
+            var cwd = Directory.GetCurrentDirectory();
+            var jsonOutputPath = Path.GetFullPath(config.OutputPaths.Json, cwd);
+            var binaryOutputPath = Path.GetFullPath(config.OutputPaths.Binary, cwd);
+            var codeOutputPath = Path.GetFullPath(config.OutputPaths.Code, cwd);
 
-            // Create output directories
-            Console.WriteLine("Creating output directories...");
-            var outputDirs = new List<string> { jsonOutputPath, binaryOutputPath, codeOutputPath };
-            foreach (var dir in outputDirs)
+            EnsureOutputDirectories(config, jsonOutputPath, binaryOutputPath, codeOutputPath);
+
+            if (config.CleanOutputsBeforeGenerate)
             {
-                if (!Directory.Exists(dir))
-                {
-                    Directory.CreateDirectory(dir);
-                }
+                if (config.Generators.EnableJson)
+                    TryCleanOutputDirectory(jsonOutputPath, "JSON output");
+                if (config.Generators.EnableBinary)
+                    TryCleanOutputDirectory(binaryOutputPath, "binary output");
+                if (config.Generators.EnableCode)
+                    TryCleanOutputDirectory(codeOutputPath, "code output");
             }
-
-            // Clean binary output directory (keep only ext subdirectory)
-            if (Directory.Exists(binaryOutputPath))
-            {
-                try
-                {
-                    foreach (var dir in Directory.GetDirectories(binaryOutputPath))
-                    {
-                        if (Path.GetFileName(dir).ToLower() != "ext")
-                            Directory.Delete(dir, true);
-                    }
-                    foreach (var file in Directory.GetFiles(binaryOutputPath))
-                    {
-                        File.Delete(file);
-                    }
-                    Console.WriteLine($"Cleaned output directory (except ext): {binaryOutputPath}\n");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Failed to clean output directory: {ex.Message}");
-                }
-            }
-
-            // Clean Unity output directories (if exist)
-            string unityRoot = null;
-            try
-            {
-                // Check if running in Unity environment
-                unityRoot = Directory.GetParent(Directory.GetCurrentDirectory()).FullName;
-                var unityCode = Path.Combine(unityRoot, "Assets/Scripts/ConfigData/code");
-                if (Directory.Exists(unityCode))
-                {
-                    foreach (var dir in Directory.GetDirectories(unityCode))
-                    {
-                        if (Path.GetFileName(dir).ToLower() != "ext")
-                            Directory.Delete(dir, true);
-                    }
-                    foreach (var file in Directory.GetFiles(unityCode))
-                    {
-                        File.Delete(file);
-                    }
-                    Console.WriteLine($"Cleaned Unity code output (except ext): {unityCode}");
-                }
-            }
-            catch { /* Ignore Unity path exception */ }
-
 
             Logger.Info("Processing Excel data...");
 
-            // Parse Excel
             var excelParser = new ExcelParser();
             var data = await excelParser.ParseAsync(config.ExcelPath, config.EnumPath);
 
             if (data.Tables.Count == 0 && data.Enums.Count == 0)
             {
-                Console.WriteLine("Warning: No Excel data tables or enum types found.");
-                Console.WriteLine("Please make sure valid .xlsx files are present in the excels/ directory.");
+                Console.WriteLine("No data tables or enum files were produced. Check excels/ and enumPath in settings.");
                 return;
             }
 
-            // Data validation
             var validator = new DataValidator();
             var validationResult = await validator.ValidateAsync(data, config.Validation);
-            
+
             if (!validationResult.IsValid)
             {
-                Console.WriteLine($"Data validation failed: {validationResult.Errors.Count} error(s)");
+                Console.WriteLine($"Validation failed ({validationResult.Errors.Count} issue(s)):");
                 foreach (var error in validationResult.Errors)
-                {
                     Console.WriteLine($"  - {error}");
-                }
-                Logger.Error("Build terminated due to data validation errors.");
+                Logger.Error("Build stopped: validation errors.");
                 Environment.Exit(1);
             }
-            else
-            {
-                Logger.Info("Data validation passed");
-                Console.WriteLine();
-            }
 
-            // Generate output
+            Logger.Info("Validation passed.");
+            Console.WriteLine();
+
             var generator = new OutputGenerator();
-            var startTime = DateTime.Now;
+            var startTime = DateTime.UtcNow;
 
-            Console.WriteLine($"Start generating output files...");
-            Console.WriteLine();
-
-            Console.WriteLine($"JSON generation enabled: {config.Generators.EnableJson}");
+            Console.WriteLine("Generating outputs...");
             if (config.Generators.EnableJson)
-            {
                 await generator.GenerateJsonAsync(data, jsonOutputPath);
-            }
-
             if (config.Generators.EnableBinary)
-            {
                 await generator.GenerateBinaryAsync(data, binaryOutputPath);
-            }
-
             if (config.Generators.EnableCode)
-            {
                 await generator.GenerateCodeAsync(data, codeOutputPath, config.CodeGeneration);
-            }
 
-            var endTime = DateTime.Now;
-            var duration = endTime - startTime;
+            var duration = DateTime.UtcNow - startTime;
 
             Console.WriteLine();
-            Console.WriteLine("All files generated successfully!");
-            Console.WriteLine($"Total time: {duration.TotalMilliseconds:F0}ms");
-            Console.WriteLine();
-            Console.WriteLine("Output directories:");
+            Console.WriteLine($"Done in {duration.TotalMilliseconds:F0} ms.");
             if (config.Generators.EnableJson)
-            {
-                Console.WriteLine($"  JSON: {jsonOutputPath}");
-            }
+                Console.WriteLine($"  JSON:    {jsonOutputPath}");
             if (config.Generators.EnableBinary)
-            {
-                Console.WriteLine($"  Binary: {binaryOutputPath}");
-            }
+                Console.WriteLine($"  Binary:  {binaryOutputPath}");
             if (config.Generators.EnableCode)
-            {
-                Console.WriteLine($"  Code: {codeOutputPath}");
-            }
+                Console.WriteLine($"  Code:    {codeOutputPath}");
             Console.WriteLine();
-            
-            Logger.Info($"All files generated successfully! Total time: {duration.TotalMilliseconds:F0}ms");
+
+            Logger.Info($"Generation finished in {duration.TotalMilliseconds:F0} ms.");
         }
         catch (FileNotFoundException ex)
         {
             Console.WriteLine($"File not found: {ex.Message}");
-            Logger.Error($"File not found: {ex.Message}");
+            Logger.Error(ex.Message);
             Environment.Exit(1);
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"An error occurred: {ex.Message}");
-            Logger.Error($"An error occurred: {ex.Message}");
+            Console.WriteLine($"Error: {ex.Message}");
+            Logger.Error(ex.Message);
             if (ex.InnerException != null)
             {
-                Console.WriteLine($"   Details: {ex.InnerException.Message}");
-                Logger.Error($"Details: {ex.InnerException.Message}");
+                Console.WriteLine($"  {ex.InnerException.Message}");
+                Logger.Error(ex.InnerException.Message);
             }
             Environment.Exit(1);
+        }
+    }
+
+    private static void EnsureOutputDirectories(
+        ToolConfiguration config,
+        string jsonPath,
+        string binaryPath,
+        string codePath)
+    {
+        var paths = new List<string>();
+        if (config.Generators.EnableJson)
+            paths.Add(jsonPath);
+        if (config.Generators.EnableBinary)
+            paths.Add(binaryPath);
+        if (config.Generators.EnableCode)
+            paths.Add(codePath);
+
+        foreach (var path in paths)
+        {
+            if (!Directory.Exists(path))
+                Directory.CreateDirectory(path);
+        }
+    }
+
+    /// <summary>Deletes files and subfolders except <c>ext</c> (hand-written partials).</summary>
+    private static void TryCleanOutputDirectory(string path, string label)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(path))
+            {
+                if (string.Equals(Path.GetFileName(dir), "ext", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                Directory.Delete(dir, recursive: true);
+            }
+
+            foreach (var file in Directory.GetFiles(path))
+                File.Delete(file);
+
+            Console.WriteLine($"Cleaned {label}: {path}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Warning: could not clean {label} ({path}): {ex.Message}");
         }
     }
 
     private static void ShowHelp()
     {
-        Console.WriteLine("Game Data Tool - Game Data Configuration Utility");
-        Console.WriteLine();
         Console.WriteLine("Usage:");
-        Console.WriteLine("  dotnet run                    # Run normally");
-        Console.WriteLine("  dotnet run --help            # Show help");
+        Console.WriteLine("  dotnet run");
+        Console.WriteLine("  dotnet run -- --help");
         Console.WriteLine();
-        Console.WriteLine("Options:");
-        Console.WriteLine("  --help, -h         Show this help message");
+        Console.WriteLine("Layout:");
+        Console.WriteLine("  config/settings.json  — paths, toggles, namespace");
+        Console.WriteLine("  excels/*.xlsx         — one workbook per table (first sheet only)");
+        Console.WriteLine("  excels/<enumPath>/    — enum workbooks");
         Console.WriteLine();
-        Console.WriteLine("Config file: config/settings.json");
-        Console.WriteLine("Excel files: excels/ directory");
-        Console.WriteLine();
-        Console.WriteLine("Environment Detection:");
-        Console.WriteLine("  - If in Unity project: Outputs to Assets/Scripts/ConfigData/");
-        Console.WriteLine("  - If standalone: Outputs to local output/ directory");
+        Console.WriteLine("Run from the tool root so relative paths in settings resolve correctly.");
     }
-} 
+}

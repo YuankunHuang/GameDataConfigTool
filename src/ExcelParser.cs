@@ -1,32 +1,25 @@
-using ExcelDataReader;
 using OfficeOpenXml;
-using System.Data;
 using GameDataTool.Core.Logging;
+using static GameDataTool.FieldValueDefaults;
 
 namespace GameDataTool.Parsers;
 
 public class ExcelParser
 {
-    private List<EnumType> _enums = new List<EnumType>();
+    private List<EnumType> _enums = new();
 
     public Task<GameData> ParseAsync(string excelPath, string enumPath)
     {
         Logger.Info($"Parsing Excel files, path: {excelPath}");
-        
+
         var data = new GameData();
-        
-        // Register encoding provider
-        System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
 
         try
         {
-            // Parse enum types
             string enumDir = Path.IsPathRooted(enumPath) ? enumPath : Path.Combine(excelPath, enumPath);
-
             ParseEnumTypes(data, enumDir);
             _enums = data.Enums;
-            
-            // Parse data tables
+
             ParseDataTables(data, excelPath);
         }
         catch (Exception ex)
@@ -34,7 +27,7 @@ public class ExcelParser
             Logger.Error($"Excel parsing failed: {ex.Message}");
             throw;
         }
-        
+
         return Task.FromResult(data);
     }
 
@@ -51,59 +44,49 @@ public class ExcelParser
 
         foreach (var file in enumFiles)
         {
-            try
-            {
-                var enumType = ParseEnumFile(file);
-                data.Enums.Add(enumType);
-            }
-            catch (Exception ex)
-            {
-                throw;
-            }
+            var enumType = ParseEnumFile(file);
+            data.Enums.Add(enumType);
         }
     }
 
     private EnumType ParseEnumFile(string filePath)
     {
         var enumName = Path.GetFileNameWithoutExtension(filePath);
-        var enumType = new EnumType
-        {
-            Name = enumName
-        };
+        var enumType = new EnumType { Name = enumName };
 
         Logger.Info($"Parsing {enumName}");
 
-        // Use EPPlus to read Excel
         ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
         using var package = new ExcelPackage(new FileInfo(filePath));
         var worksheet = package.Workbook.Worksheets[0];
 
         if (worksheet.Dimension == null || worksheet.Dimension.Rows < 2)
         {
-            throw new InvalidDataException($"Enum file {Path.GetFileName(filePath)} does not have enough rows, at least 2 required (header + data)");
+            throw new InvalidDataException(
+                $"Enum file {Path.GetFileName(filePath)} does not have enough rows, at least 2 required (header + data)");
         }
 
-        for (int row = 2; row <= worksheet.Dimension.Rows; row++) // Skip header
+        for (int row = 2; row <= worksheet.Dimension.Rows; row++)
         {
             var nameCell = worksheet.Cells[row, 1];
             var valueCell = worksheet.Cells[row, 2];
             var commentCell = worksheet.Cells[row, 3];
-            
+
             if (nameCell.Value != null && valueCell.Value != null)
             {
-                var enumValue = new EnumValue
+                enumType.Values.Add(new EnumValue
                 {
                     Name = nameCell.Value.ToString() ?? "",
                     Value = Convert.ToInt32(valueCell.Value),
                     Description = commentCell.Value?.ToString() ?? ""
-                };
-                enumType.Values.Add(enumValue);
+                });
             }
         }
 
         if (enumType.Values.Count == 0)
         {
-            throw new InvalidDataException($"Enum file {Path.GetFileName(filePath)} does not contain any valid enum values");
+            throw new InvalidDataException(
+                $"Enum file {Path.GetFileName(filePath)} does not contain any valid enum values");
         }
 
         return enumType;
@@ -111,86 +94,107 @@ public class ExcelParser
 
     private void ParseDataTables(GameData data, string excelPath)
     {
-        // Only read .xlsx files in the main directory, do not recurse
         var excelFiles = Directory.GetFiles(excelPath, "*.xlsx", SearchOption.TopDirectoryOnly);
         Logger.Info($"Found {excelFiles.Length} data table file(s)");
 
         foreach (var file in excelFiles)
         {
-            try
-            {
-                var table = ParseDataTable(file);
-                data.Tables.Add(table);
-            }
-            catch (Exception ex)
-            {
-                throw;
-            }
+            var table = ParseDataTable(file);
+            data.Tables.Add(table);
         }
     }
 
     private DataTable ParseDataTable(string filePath)
     {
         var tableName = Path.GetFileNameWithoutExtension(filePath);
-        var table = new DataTable
-        {
-            Name = tableName
-        };
+        var table = new DataTable { Name = tableName };
 
         Logger.Info($"Parsing {tableName}");
 
-        // Use EPPlus to read Excel with comments
         ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
         using var package = new ExcelPackage(new FileInfo(filePath));
         var worksheet = package.Workbook.Worksheets[0];
 
         if (worksheet.Dimension == null || worksheet.Dimension.Rows < 2)
         {
-            throw new InvalidDataException($"Data table {Path.GetFileName(filePath)} does not have enough rows, at least 2 required (field name + type + data)");
+            throw new InvalidDataException(
+                $"Data table {Path.GetFileName(filePath)} does not have enough rows, at least 2 required (header + data)");
         }
 
-        // Parse field definitions (first row)
         ParseFieldsWithComments(table, worksheet);
-        
-        // Parse data rows
+        ValidateTableIdColumn(table);
         ParseDataRowsWithEPPlus(table, worksheet);
 
         if (table.Rows.Count == 0)
         {
-            throw new InvalidDataException($"Data table {Path.GetFileName(filePath)} does not contain any valid data rows");
+            throw new InvalidDataException(
+                $"Data table {Path.GetFileName(filePath)} does not contain any valid data rows");
         }
 
         return table;
     }
 
+    /// <summary>First column must be <c>id|int</c> (not nullable) so runtime <c>GetById</c> indexes on <c>Id</c>.</summary>
+    private static void ValidateTableIdColumn(DataTable table)
+    {
+        if (table.Fields.Count == 0)
+        {
+            throw new InvalidDataException($"Table '{table.Name}' has no columns.");
+        }
+
+        var id = table.Fields[0];
+        if (!id.Name.Equals("id", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"Table '{table.Name}': first column must be id|int (found '{id.Name}'). Move the primary key to column A.");
+        }
+
+        if (id.Type != FieldType.Int)
+        {
+            throw new InvalidDataException(
+                $"Table '{table.Name}': first column must be id|int (found type '{id.RawType}').");
+        }
+
+        if (id.Nullable)
+        {
+            throw new InvalidDataException($"Table '{table.Name}': id cannot be marked nullable.");
+        }
+    }
+
     private void ParseFieldsWithComments(DataTable table, ExcelWorksheet worksheet)
     {
-        // Read the first row for field definitions
         for (int col = 1; col <= worksheet.Dimension.Columns; col++)
         {
             var cell = worksheet.Cells[1, col];
-            var cellText = cell.Text;
-            
-            if (string.IsNullOrWhiteSpace(cellText) || !cellText.Contains("|"))
+            var cellText = cell.Text.Trim();
+
+            if (string.IsNullOrWhiteSpace(cellText) || !cellText.Contains('|'))
             {
-                throw new InvalidDataException($"Header column {col} format error, must be FieldName|Type, e.g., id|int, name|string");
+                throw new InvalidDataException(
+                    $"Table '{table.Name}' header column {col}: expected FieldName|Type or FieldName|Type|nullable");
             }
-            
-            var parts = cellText.Split('|');
-            if (parts.Length != 2)
+
+            var parts = cellText.Split('|', StringSplitOptions.TrimEntries);
+            if (parts.Length < 2 || parts.Length > 3)
             {
-                throw new InvalidDataException($"Header column {col} format error, must be FieldName|Type");
+                throw new InvalidDataException(
+                    $"Table '{table.Name}' header column {col}: use FieldName|Type or FieldName|Type|flags — got {parts.Length} segment(s).");
             }
-            
-            var fieldName = parts[0].Trim();
-            var typeStr = parts[1].Trim();
-            
-            // Get comment from the cell
+
+            var fieldName = parts[0];
+            var typeStr = parts[1];
+            var nullable = ParseNullableFlag(table.Name, col, parts.Length == 3 ? parts[2] : null);
+
             var comment = cell.Comment?.Text ?? string.Empty;
-            
-            // parse types and references
-            var (fieldType, rawType, refTable, refField, enumType, rangeMin, rangeMax) = ParseFieldType(typeStr);
-            var field = new Field
+            var (fieldType, rawType, refTable, refField, enumType, rangeMin, rangeMax) = ParseFieldType(typeStr, table.Name, col);
+
+            if (fieldType == FieldType.Enum && string.IsNullOrWhiteSpace(enumType))
+            {
+                throw new InvalidDataException(
+                    $"Table '{table.Name}' header column {col}: enum() must name a type, e.g. enum(ItemRarity).");
+            }
+
+            table.Fields.Add(new Field
             {
                 Name = fieldName,
                 Type = fieldType,
@@ -200,81 +204,114 @@ public class ExcelParser
                 EnumType = enumType,
                 RangeMin = rangeMin,
                 RangeMax = rangeMax,
-                Description = comment
-            };
-            table.Fields.Add(field);
+                Description = comment,
+                Nullable = nullable
+            });
         }
+    }
+
+    private static bool ParseNullableFlag(string tableName, int col, string? flagsSegment)
+    {
+        if (string.IsNullOrEmpty(flagsSegment))
+            return false;
+
+        var nullable = false;
+        foreach (var flag in flagsSegment.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (flag.Equals("nullable", StringComparison.OrdinalIgnoreCase))
+                nullable = true;
+            else
+            {
+                throw new InvalidDataException(
+                    $"Table '{tableName}' header column {col}: unknown flag '{flag}'. Only 'nullable' is supported.");
+            }
+        }
+
+        return nullable;
+    }
+
+    /// <summary>Canonical string used when a nullable cell is left blank (matches binary / runtime defaults).</summary>
+    public static string DefaultCellString(Field field)
+    {
+        return field.Type switch
+        {
+            FieldType.String => "",
+            FieldType.Int or FieldType.Long or FieldType.Float or FieldType.Enum => "0",
+            FieldType.Bool => "false",
+            FieldType.DateTime => DateTimeMinValueIso,
+            _ => ""
+        };
     }
 
     private void ParseDataRowsWithEPPlus(DataTable table, ExcelWorksheet worksheet)
     {
-        for (int row = 2; row <= worksheet.Dimension.Rows; row++) // data starts from the 2nd row
+        for (int row = 2; row <= worksheet.Dimension.Rows; row++)
         {
             var dataRow = new DataRow();
-            
-            for (int col = 1; col <= table.Fields.Count; col++) // Only read as many columns as we have fields
+
+            for (int col = 1; col <= table.Fields.Count; col++)
             {
+                var field = table.Fields[col - 1];
                 var cell = worksheet.Cells[row, col];
                 var value = cell.Value;
-                string strValue = value != null ? value.ToString() ?? "" : "";
+                var strValue = (value?.ToString() ?? "").Trim();
 
-                if (col <= table.Fields.Count)
+                if (string.IsNullOrEmpty(strValue))
                 {
-                    var field = table.Fields[col - 1];
-                    
-                    if (field.Type == FieldType.Enum && !string.IsNullOrEmpty(strValue))
+                    if (field.Nullable)
+                        strValue = DefaultCellString(field);
+                    dataRow.Values.Add(strValue);
+                    continue;
+                }
+
+                if (field.Type == FieldType.Enum)
+                {
+                    if (!int.TryParse(strValue, out _))
                     {
-                        // first, try to convert to integer
-                        if (!int.TryParse(strValue, out var enumValue))
+                        var enumType = _enums.FirstOrDefault(e =>
+                            e.Name.Equals(field.EnumType, StringComparison.OrdinalIgnoreCase));
+                        if (enumType == null)
                         {
-                            // if no match, then try enum name
-                            var enumType = _enums.FirstOrDefault(e => e.Name.Equals(field.EnumType, StringComparison.OrdinalIgnoreCase));
-                            if (enumType != null)
-                            {
-                                var found = enumType.Values.FirstOrDefault(ev => ev.Name.Equals(strValue, StringComparison.OrdinalIgnoreCase));
-                                if (found != null)
-                                {
-                                    strValue = found.Value.ToString();
-                                }
-                                else
-                                {
-                                    throw new InvalidDataException($"Invalid enum name in table '{table.Name}', row {row}, column {col}: '{strValue}' is not defined in enum '{field.EnumType}'");
-                                }
-                            }
-                            else
-                            {
-                                throw new InvalidDataException($"Enum type '{field.EnumType}' not found for table '{table.Name}', row {row}, column {col}");
-                            }
+                            throw new InvalidDataException(
+                                $"Enum type '{field.EnumType}' not found for table '{table.Name}', Excel row {row}, column {col}");
                         }
+
+                        var found = enumType.Values.FirstOrDefault(ev =>
+                            ev.Name.Equals(strValue, StringComparison.OrdinalIgnoreCase));
+                        if (found == null)
+                        {
+                            throw new InvalidDataException(
+                                $"Invalid enum name in table '{table.Name}', Excel row {row}, column {col}: '{strValue}' is not defined in enum '{field.EnumType}'");
+                        }
+
+                        strValue = found.Value.ToString();
                     }
-                    if (field.Type == FieldType.DateTime && !string.IsNullOrEmpty(strValue))
+                }
+
+                if (field.Type == FieldType.DateTime)
+                {
+                    if (DateTime.TryParseExact(strValue, "yyyy-MM-dd HH:mm:ss", null,
+                            System.Globalization.DateTimeStyles.None, out var dateTimeValue))
                     {
-                        // Parse DateTime using exact format yyyy-MM-dd HH:mm:ss
-                        if (DateTime.TryParseExact(strValue, "yyyy-MM-dd HH:mm:ss", null, System.Globalization.DateTimeStyles.None, out var dateTimeValue))
-                        {
-                            // Standardize to yyyy-MM-dd HH:mm:ss
-                            strValue = dateTimeValue.ToString("yyyy-MM-dd HH:mm:ss");
-                        }
-                        else
-                        {
-                            throw new InvalidDataException($"Invalid datetime format in table '{table.Name}', row {row}, column {col}: '{strValue}'. Expected format: yyyy-MM-dd HH:mm:ss");
-                        }
+                        strValue = dateTimeValue.ToString("yyyy-MM-dd HH:mm:ss");
+                    }
+                    else
+                    {
+                        throw new InvalidDataException(
+                            $"Invalid datetime in table '{table.Name}', Excel row {row}, column {col}: '{strValue}'. Expected: yyyy-MM-dd HH:mm:ss");
                     }
                 }
 
                 dataRow.Values.Add(strValue);
             }
 
-            // Only add non-empty rows
             if (dataRow.Values.Any(v => !string.IsNullOrWhiteSpace(v)))
-            {
                 table.Rows.Add(dataRow);
-            }
         }
     }
 
-    // supports complex header
-    private (FieldType, string, string?, string?, string?, int?, int?) ParseFieldType(string typeStr)
+    private (FieldType fieldType, string rawType, string? refTable, string? refField, string? enumType, int? rangeMin, int? rangeMax)
+        ParseFieldType(string typeStr, string tableName, int col)
     {
         string? refTable = null;
         string? refField = null;
@@ -283,53 +320,55 @@ public class ExcelParser
         int? rangeMax = null;
         var rawType = typeStr;
         var lower = typeStr.Trim().ToLowerInvariant();
-        if (lower.StartsWith("enum(") && lower.EndsWith(")"))
+
+        if (lower.StartsWith("enum(", StringComparison.Ordinal) && lower.EndsWith(')'))
         {
-            enumType = typeStr.Substring(5, typeStr.Length - 6);
+            enumType = typeStr.Substring(5, typeStr.Length - 6).Trim();
             return (FieldType.Enum, rawType, null, null, enumType, null, null);
         }
-        if (lower.Contains("^range("))
+
+        if (lower.Contains("^range(", StringComparison.OrdinalIgnoreCase))
         {
-            // e.g. int^Range(0, 100)
             var typeMain = typeStr.Split('^')[0].Trim();
-            var rangeInfo = typeStr.Substring(typeStr.IndexOf('^') + 1);
-            var rangeStart = rangeInfo.IndexOf('(');
-            var rangeEnd = rangeInfo.IndexOf(')');
+            var rangeInfo = typeStr[typeStr.IndexOf('^', StringComparison.Ordinal)..];
+            var rangeStart = rangeInfo.IndexOf('(', StringComparison.Ordinal);
+            var rangeEnd = rangeInfo.IndexOf(')', StringComparison.Ordinal);
             if (rangeStart > 0 && rangeEnd > rangeStart)
             {
                 var rangeContent = rangeInfo.Substring(rangeStart + 1, rangeEnd - rangeStart - 1);
                 var rangeParts = rangeContent.Split(',');
-                if (rangeParts.Length == 2)
+                if (rangeParts.Length == 2 &&
+                    int.TryParse(rangeParts[0].Trim(), out var min) &&
+                    int.TryParse(rangeParts[1].Trim(), out var max))
                 {
-                    if (int.TryParse(rangeParts[0].Trim(), out var min) && int.TryParse(rangeParts[1].Trim(), out var max))
-                    {
-                        rangeMin = min;
-                        rangeMax = max;
-                    }
+                    rangeMin = min;
+                    rangeMax = max;
                 }
             }
-            var fieldType = typeMain.ToLower() switch
+
+            var fieldType = typeMain.ToLowerInvariant() switch
             {
                 "int" or "integer" => FieldType.Int,
                 "long" => FieldType.Long,
                 "float" or "double" => FieldType.Float,
-                _ => FieldType.Int // default to int for range
+                _ => FieldType.Int
             };
             return (fieldType, rawType, null, null, null, rangeMin, rangeMax);
         }
-        if (lower.Contains("^id("))
+
+        if (lower.Contains("^id(", StringComparison.OrdinalIgnoreCase))
         {
-            // e.g. int^id(Resource)
             var typeMain = typeStr.Split('^')[0].Trim();
-            var refInfo = typeStr.Substring(typeStr.IndexOf('^') + 1);
-            var refFieldStart = refInfo.IndexOf('(');
-            var refFieldEnd = refInfo.IndexOf(')');
+            var refInfo = typeStr[typeStr.IndexOf('^', StringComparison.Ordinal)..];
+            var refFieldStart = refInfo.IndexOf('(', StringComparison.Ordinal);
+            var refFieldEnd = refInfo.IndexOf(')', StringComparison.Ordinal);
             if (refFieldStart > 0 && refFieldEnd > refFieldStart)
             {
                 refField = refInfo.Substring(0, refFieldStart);
                 refTable = refInfo.Substring(refFieldStart + 1, refFieldEnd - refFieldStart - 1);
             }
-            var fieldType = typeMain.ToLower() switch
+
+            var fieldType = typeMain.ToLowerInvariant() switch
             {
                 "int" or "integer" => FieldType.Int,
                 "long" => FieldType.Long,
@@ -337,11 +376,11 @@ public class ExcelParser
                 "string" or "text" => FieldType.String,
                 "bool" or "boolean" => FieldType.Bool,
                 "datetime" or "date" => FieldType.DateTime,
-                _ => FieldType.String // default
+                _ => FieldType.String
             };
             return (fieldType, rawType, refTable, refField, null, null, null);
         }
-        // normal types
+
         var type = lower switch
         {
             "int" or "integer" => FieldType.Int,
@@ -350,72 +389,10 @@ public class ExcelParser
             "string" or "text" => FieldType.String,
             "bool" or "boolean" => FieldType.Bool,
             "datetime" or "date" => FieldType.DateTime,
-            _ => FieldType.String
+            _ => throw new InvalidDataException(
+                $"Table '{tableName}' header column {col}: unknown type '{typeStr}'. Use int, long, float, string, bool, datetime, enum(Name), int^id(Table), int^Range(min,max).")
         };
         return (type, rawType, null, null, null, null, null);
-    }
-
-    private void ParseDataRows(DataTable table, System.Data.DataTable excelTable)
-    {
-        for (int row = 1; row < excelTable.Rows.Count; row++) // data starts from the 2nd row
-        {
-            var dataRow = new DataRow();
-            var excelRow = excelTable.Rows[row];
-
-            for (int col = 0; col < table.Fields.Count && col < excelRow.ItemArray.Length; col++)
-            {
-                var field = table.Fields[col];
-                var value = excelRow[col];
-                string strValue = value != DBNull.Value ? value.ToString() ?? "" : "";
-
-                if (field.Type == FieldType.Enum && !string.IsNullOrEmpty(strValue))
-                {
-                    // first, try to convert to integer
-                    if (!int.TryParse(strValue, out var enumValue))
-                    {
-                        // if no match, then try enum name
-                        var enumType = _enums.FirstOrDefault(e => e.Name.Equals(field.EnumType, StringComparison.OrdinalIgnoreCase));
-                        if (enumType != null)
-                        {
-                            var found = enumType.Values.FirstOrDefault(ev => ev.Name.Equals(strValue, StringComparison.OrdinalIgnoreCase));
-                            if (found != null)
-                            {
-                                strValue = found.Value.ToString();
-                            }
-                            else
-                            {
-                                throw new InvalidDataException($"Invalid enum name in table '{table.Name}', row {row + 1}, column {col + 1}: '{strValue}' is not defined in enum '{field.EnumType}'");
-                            }
-                        }
-                        else
-                        {
-                            throw new InvalidDataException($"Enum type '{field.EnumType}' not found for table '{table.Name}', row {row + 1}, column {col + 1}");
-                        }
-                    }
-                }
-                if (field.Type == FieldType.DateTime && !string.IsNullOrEmpty(strValue))
-                {
-                    // Parse DateTime using exact format yyyy-MM-dd HH:mm:ss
-                    if (DateTime.TryParseExact(strValue, "yyyy-MM-dd HH:mm:ss", null, System.Globalization.DateTimeStyles.None, out var dateTimeValue))
-                    {
-                        // Standardize to yyyy-MM-dd HH:mm:ss
-                        strValue = dateTimeValue.ToString("yyyy-MM-dd HH:mm:ss");
-                    }
-                    else
-                    {
-                        throw new InvalidDataException($"Invalid datetime format in table '{table.Name}', row {row + 1}, column {col + 1}: '{strValue}'. Expected format: yyyy-MM-dd HH:mm:ss");
-                    }
-                }
-
-                dataRow.Values.Add(strValue);
-            }
-
-            // Only add non-empty rows
-            if (dataRow.Values.Any(v => !string.IsNullOrWhiteSpace(v)))
-            {
-                table.Rows.Add(dataRow);
-            }
-        }
     }
 }
 
@@ -443,6 +420,9 @@ public class Field
     public string? EnumType { get; set; }
     public int? RangeMin { get; set; }
     public int? RangeMax { get; set; }
+
+    /// <summary>When true, an empty cell is allowed and is normalized to the type default before validation and export.</summary>
+    public bool Nullable { get; set; }
 }
 
 public class DataRow
@@ -472,4 +452,4 @@ public enum FieldType
     Bool,
     DateTime,
     Enum
-} 
+}

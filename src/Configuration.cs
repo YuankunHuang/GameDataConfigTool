@@ -76,6 +76,9 @@ public class ToolConfiguration
     public CodeGeneration CodeGeneration { get; set; } = new();
     public Validation Validation { get; set; } = new();
     public Logging Logging { get; set; } = new();
+
+    /// <summary>When true, delete previous generator outputs under configured paths (always preserves an <c>ext</c> subdirectory).</summary>
+    public bool CleanOutputsBeforeGenerate { get; set; } = true;
 }
 
 public class OutputPaths
@@ -97,13 +100,14 @@ public class CodeGeneration
     public string Namespace { get; set; } = "GameData";
     public string Language { get; set; } = "csharp";
     public bool GenerateEnum { get; set; } = true;
-    public bool GenerateLoader { get; set; } = true;
 }
 
 public class Validation
 {
     public bool EnableTypeCheck { get; set; } = true;
-    public bool EnableRequiredFieldCheck { get; set; } = true;
+
+    /// <summary>When true, columns without <c>|nullable</c> must have a non-empty cell.</summary>
+    public bool EnforceNonNullableColumns { get; set; } = true;
 }
 
 public class Logging

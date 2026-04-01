@@ -1,4 +1,5 @@
 using GameDataTool.Core.Logging;
+using static GameDataTool.FieldValueDefaults;
 using System.Text.Encodings.Web;
 using Newtonsoft.Json;
 using GameDataTool.Parsers;
@@ -43,7 +44,7 @@ public class OutputGenerator
                     
                     if (!string.IsNullOrEmpty(value))
                     {
-                        rowData[field.Name] = ConvertValue(field.Type, value);
+                        rowData[field.Name] = ConvertValue(field.Type, value) ?? value;
                     }
                 }
                 tableData.Add(rowData);
@@ -84,11 +85,6 @@ public class OutputGenerator
 
         // Generate centralized data manager
         await GenerateDataManagerAsync(data, outputPath, config);
-
-        if (config.GenerateLoader)
-        {
-            // await GenerateDataLoaderAsync(data, outputPath, config); // Removed as per edit hint
-        }
     }
 
     private async Task GenerateEnumCodeAsync(GameDataTool.Parsers.GameData data, string outputPath, CodeGeneration config)
@@ -436,7 +432,7 @@ public class OutputGenerator
             FieldType.Float => "0",
             FieldType.Bool => "false",
             FieldType.Enum => "0",
-            FieldType.DateTime => "0001-01-01 00:00:00", // DateTime.MinValue
+            FieldType.DateTime => DateTimeMinValueIso,
             _ => ""
         };
     }
@@ -595,7 +591,6 @@ public class OutputGenerator
         return char.ToUpper(input[0]) + input.Substring(1);
     }
 
-    // 1. In the code generation logic, generate the BaseConfigData.cs file with the following content:
     private string GenerateBaseConfigDataClass(CodeGeneration config)
     {
         var code = new StringBuilder();

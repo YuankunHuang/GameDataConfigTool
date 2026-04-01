@@ -1,31 +1,30 @@
-using GameDataTool.Core.Logging;
 using GameDataTool.Core.Configuration;
 
 namespace GameDataTool.Parsers;
 
+/// <summary>
+/// Validation rules and Excel coordinates (row 1 = header, row 2+ = data).
+/// </summary>
 public class DataValidator
 {
+    private static int ExcelDataRow(int zeroBasedRowIndex) => zeroBasedRowIndex + 2;
+
     public Task<ValidationResult> ValidateAsync(GameData data, Validation config)
     {
         var result = new ValidationResult();
-        
+
         Console.WriteLine();
         Console.WriteLine("Start data validation...");
         Console.WriteLine();
 
         if (config.EnableTypeCheck)
-        {
             ValidateTypes(data, result);
-        }
 
-        if (config.EnableRequiredFieldCheck)
-        {
-            ValidateRequiredFields(data, result);
-        }
+        if (config.EnforceNonNullableColumns)
+            ValidateNonNullableFields(data, result);
 
-        // Additional validation rules
         ValidateEnumReferences(data, result);
-        ValidateDataIntegrity(data, result);
+        ValidateDuplicateIds(data, result);
         ValidateFieldNames(data, result);
         ValidateForeignKeyReferences(data, result);
 
@@ -44,63 +43,57 @@ public class DataValidator
                     var field = table.Fields[colIndex];
                     var value = row.Values[colIndex];
 
-                    // Only validate non-empty values for type checking
-                    // Empty strings are valid for string fields and should be allowed
-                    if (!string.IsNullOrEmpty(value))
+                    if (string.IsNullOrEmpty(value))
+                        continue;
+
+                    var (isValid, errorMessage) = ValidateFieldTypeWithMessage(field, value);
+                    if (!isValid)
                     {
-                        var (isValid, errorMessage) = ValidateFieldTypeWithMessage(field, value);
-                        if (!isValid)
-                        {
-                            result.Errors.Add($"Table {table.Name} Row {rowIndex + 4} Col {colIndex + 1}: Field {field.Name} {errorMessage}");
-                        }
+                        result.Errors.Add(
+                            $"[{table.Name}] Excel row {ExcelDataRow(rowIndex)}, col {colIndex + 1} ({field.Name}): {errorMessage}");
                     }
                 }
             }
         }
     }
 
-    private bool ValidateFieldType(Field field, string value)
-    {
-        return ValidateFieldTypeWithMessage(field, value).Item1;
-    }
-
-    private (bool isValid, string errorMessage) ValidateFieldTypeWithMessage(Field field, string value)
+    private static (bool isValid, string errorMessage) ValidateFieldTypeWithMessage(Field field, string value)
     {
         var typeValid = field.Type switch
         {
             FieldType.Int => int.TryParse(value, out _),
             FieldType.Long => long.TryParse(value, out _),
             FieldType.Float => float.TryParse(value, out _),
-            FieldType.Bool => value.Trim().ToLower() is "0" or "1" or "true" or "false",
-            FieldType.String => true, // Any string value is valid, including empty strings
+            FieldType.Bool => value.Trim().ToLowerInvariant() is "0" or "1" or "true" or "false",
+            FieldType.String => true,
             FieldType.Enum => int.TryParse(value, out _),
+            FieldType.DateTime => DateTime.TryParseExact(value, "yyyy-MM-dd HH:mm:ss", null,
+                System.Globalization.DateTimeStyles.None, out _),
             _ => true
         };
 
         if (!typeValid)
             return (false, $"value '{value}' does not match type {field.Type}");
 
-        // Additional range validation for int fields with range constraints
         if (field.Type == FieldType.Int && field.RangeMin.HasValue && field.RangeMax.HasValue)
         {
-            if (int.TryParse(value, out var intValue))
-            {
-                // Inclusive min, exclusive max
-                if (intValue < field.RangeMin.Value || intValue >= field.RangeMax.Value)
-                {
-                    return (false, $"value '{value}' is out of range [{field.RangeMin}, {field.RangeMax}) (inclusive min, exclusive max)");
-                }
-            }
-            else
-            {
+            if (!int.TryParse(value, out var intValue))
                 return (false, $"value '{value}' is not a valid integer for range validation");
+
+            if (intValue < field.RangeMin.Value || intValue >= field.RangeMax.Value)
+            {
+                return (false,
+                    $"value '{value}' is out of range [{field.RangeMin}, {field.RangeMax}) (inclusive min, exclusive max)");
             }
         }
 
         return (true, string.Empty);
     }
 
-    private void ValidateRequiredFields(GameData data, ValidationResult result)
+    /// <summary>
+    /// Non-nullable columns must have a non-whitespace value (id is always non-nullable by schema).
+    /// </summary>
+    private void ValidateNonNullableFields(GameData data, ValidationResult result)
     {
         foreach (var table in data.Tables)
         {
@@ -112,125 +105,104 @@ public class DataValidator
                     var field = table.Fields[colIndex];
                     var value = row.Values[colIndex];
 
-                    if (IsRequiredField(field.Name) && string.IsNullOrEmpty(value))
+                    if (!field.Nullable && string.IsNullOrWhiteSpace(value))
                     {
-                        result.Errors.Add($"Table {table.Name} Row {rowIndex + 4} Col {colIndex + 1}: Required field {field.Name} is empty");
+                        result.Errors.Add(
+                            $"[{table.Name}] Excel row {ExcelDataRow(rowIndex)}, col {colIndex + 1} ({field.Name}): non-nullable field is empty (add '|nullable' to the header if this column may be blank)");
                     }
                 }
             }
         }
     }
 
-    private bool IsRequiredField(string fieldName)
-    {
-        var lowerName = fieldName.ToLower();
-        return lowerName.Contains("id");
-    }
-
     private void ValidateEnumReferences(GameData data, ValidationResult result)
     {
-        // Validate enum references
         foreach (var table in data.Tables)
         {
             for (int fieldIndex = 0; fieldIndex < table.Fields.Count; fieldIndex++)
             {
                 var field = table.Fields[fieldIndex];
-                if (field.Type == FieldType.Enum)
+                if (field.Type != FieldType.Enum)
+                    continue;
+
+                if (string.IsNullOrWhiteSpace(field.EnumType))
                 {
-                    // Try to find the corresponding enum
-                    var enumName = field.EnumType ?? GetEnumNameFromField(field.Name);
-                    var enumType = data.Enums.FirstOrDefault(e => e.Name.Equals(enumName, StringComparison.OrdinalIgnoreCase));
-                    if (enumType == null)
-                    {
-                        result.Errors.Add($"Table {table.Name} Field {field.Name}: Enum type {enumName} is not defined");
-                        continue;
-                    }
-                    // Validate enum value is in defined range
-                    for (int rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
-                    {
-                        var row = table.Rows[rowIndex];
-                        if (fieldIndex < row.Values.Count)
-                        {
-                            var value = row.Values[fieldIndex];
-                            if (!string.IsNullOrEmpty(value))
-                            {
-                                int enumValue;
-                                if (int.TryParse(value, out enumValue))
-                                {
-                                    if (!enumType.Values.Any(v => v.Value == enumValue))
-                                    {
-                                        result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: Enum value {enumValue} is not defined in {enumName}");
-                                    }
-                                }
-                                else
-                                {
-                                    var found = enumType.Values.FirstOrDefault(ev => ev.Name.Equals(value, StringComparison.OrdinalIgnoreCase));
-                                    if (found == null)
-                                    {
-                                        result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: Enum name '{value}' is not defined in {enumName}");
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    result.Errors.Add($"[{table.Name}] field '{field.Name}': enum column must use enum(TypeName) in the header.");
+                    continue;
                 }
-            }
-        }
-    }
 
-    private string GetEnumNameFromField(string fieldName)
-    {
-        // Improved enum name inference
-        if (fieldName.ToLower().Contains("type"))
-        {
-            // If field name is just "Type", try to find a more specific enum name
-            if (fieldName.ToLower() == "type")
-            {
-                // This will be handled by the calling context to find the appropriate enum
-                return "Type";
-            }
-            // For fields like "CharacterType", return as is
-            return fieldName;
-        }
-        return fieldName + "Type";
-    }
-
-    private void ValidateDataIntegrity(GameData data, ValidationResult result)
-    {
-        foreach (var table in data.Tables)
-        {
-            // Check ID uniqueness
-            var idFieldIndex = -1;
-            for (int i = 0; i < table.Fields.Count; i++)
-            {
-                if (table.Fields[i].Name.ToLower().Contains("id"))
+                var enumType = data.Enums.FirstOrDefault(e =>
+                    e.Name.Equals(field.EnumType, StringComparison.OrdinalIgnoreCase));
+                if (enumType == null)
                 {
-                    idFieldIndex = i;
-                    break;
+                    result.Errors.Add($"[{table.Name}] field '{field.Name}': enum type '{field.EnumType}' is not defined.");
+                    continue;
                 }
-            }
 
-            if (idFieldIndex >= 0)
-            {
-                var ids = new HashSet<string>();
                 for (int rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
                 {
                     var row = table.Rows[rowIndex];
-                    if (idFieldIndex < row.Values.Count)
+                    if (fieldIndex >= row.Values.Count)
+                        continue;
+
+                    var value = row.Values[fieldIndex];
+                    if (string.IsNullOrEmpty(value))
+                        continue;
+
+                    if (int.TryParse(value, out var enumValue))
                     {
-                        var id = row.Values[idFieldIndex];
-                        if (!string.IsNullOrEmpty(id))
+                        if (!enumType.Values.Any(v => v.Value == enumValue))
                         {
-                            if (ids.Contains(id))
-                            {
-                                result.Errors.Add($"Table {table.Name} Row {rowIndex + 4}: ID '{id}' is duplicated");
-                            }
-                            else
-                            {
-                                ids.Add(id);
-                            }
+                            result.Errors.Add(
+                                $"[{table.Name}] Excel row {ExcelDataRow(rowIndex)}, col {fieldIndex + 1}: enum value {enumValue} is not defined in {field.EnumType}");
                         }
                     }
+                    else
+                    {
+                        var found = enumType.Values.FirstOrDefault(ev =>
+                            ev.Name.Equals(value, StringComparison.OrdinalIgnoreCase));
+                        if (found == null)
+                        {
+                            result.Errors.Add(
+                                $"[{table.Name}] Excel row {ExcelDataRow(rowIndex)}, col {fieldIndex + 1}: enum name '{value}' is not defined in {field.EnumType}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void ValidateDuplicateIds(GameData data, ValidationResult result)
+    {
+        const int idCol = 0;
+
+        foreach (var table in data.Tables)
+        {
+            if (table.Fields.Count == 0)
+                continue;
+
+            var ids = new HashSet<int>();
+            for (int rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
+            {
+                var row = table.Rows[rowIndex];
+                if (idCol >= row.Values.Count)
+                    continue;
+
+                var raw = row.Values[idCol]?.Trim() ?? "";
+                if (string.IsNullOrEmpty(raw))
+                    continue;
+
+                if (!int.TryParse(raw, out var id))
+                {
+                    result.Errors.Add(
+                        $"[{table.Name}] Excel row {ExcelDataRow(rowIndex)}: id must be int, got '{raw}'");
+                    continue;
+                }
+
+                if (!ids.Add(id))
+                {
+                    result.Errors.Add(
+                        $"[{table.Name}] Excel row {ExcelDataRow(rowIndex)}: duplicate id {id}");
                 }
             }
         }
@@ -241,32 +213,26 @@ public class DataValidator
         foreach (var table in data.Tables)
         {
             var fieldNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            
+
             for (int i = 0; i < table.Fields.Count; i++)
             {
                 var field = table.Fields[i];
-                
-                // Check if field name is empty
+
                 if (string.IsNullOrWhiteSpace(field.Name))
                 {
-                    result.Errors.Add($"Table {table.Name} Col {i + 1}: Field name cannot be empty");
+                    result.Errors.Add($"[{table.Name}] header col {i + 1}: field name cannot be empty");
                     continue;
                 }
 
-                // Check for duplicate field names
-                if (fieldNames.Contains(field.Name))
+                if (!fieldNames.Add(field.Name))
                 {
-                    result.Errors.Add($"Table {table.Name} Col {i + 1}: Field name '{field.Name}' is duplicated");
-                }
-                else
-                {
-                    fieldNames.Add(field.Name);
+                    result.Errors.Add($"[{table.Name}] header col {i + 1}: duplicate field name '{field.Name}'");
                 }
 
-                // Check for special characters in field name
                 if (field.Name.Any(c => !char.IsLetterOrDigit(c) && c != '_'))
                 {
-                    result.Errors.Add($"Table {table.Name} Col {i + 1}: Field name '{field.Name}' contains special characters. Only letters, digits, and underscores are recommended");
+                    result.Errors.Add(
+                        $"[{table.Name}] header col {i + 1}: field name '{field.Name}' should use only letters, digits, and underscores");
                 }
             }
         }
@@ -279,37 +245,46 @@ public class DataValidator
             for (int fieldIndex = 0; fieldIndex < table.Fields.Count; fieldIndex++)
             {
                 var field = table.Fields[fieldIndex];
-                if (!string.IsNullOrEmpty(field.ReferenceTable) && !string.IsNullOrEmpty(field.ReferenceField))
+                if (string.IsNullOrEmpty(field.ReferenceTable) || string.IsNullOrEmpty(field.ReferenceField))
+                    continue;
+
+                var refTable = data.Tables.FirstOrDefault(t =>
+                    t.Name.Equals(field.ReferenceTable, StringComparison.OrdinalIgnoreCase));
+                if (refTable == null)
                 {
-                    // search for target table & field
-                    var refTable = data.Tables.FirstOrDefault(t => t.Name.Equals(field.ReferenceTable, StringComparison.OrdinalIgnoreCase));
-                    if (refTable == null)
-                    {
-                        result.Errors.Add($"Table {table.Name} Field {field.Name}: Referenced table {field.ReferenceTable} does not exist");
+                    result.Errors.Add(
+                        $"[{table.Name}] field '{field.Name}': referenced table '{field.ReferenceTable}' does not exist");
+                    continue;
+                }
+
+                var refFieldIndex = refTable.Fields.FindIndex(f =>
+                    f.Name.Equals(field.ReferenceField, StringComparison.OrdinalIgnoreCase));
+                if (refFieldIndex < 0)
+                {
+                    result.Errors.Add(
+                        $"[{table.Name}] field '{field.Name}': referenced field '{field.ReferenceField}' not found in '{field.ReferenceTable}'");
+                    continue;
+                }
+
+                var refValues = new HashSet<string>(
+                    refTable.Rows.Select(r =>
+                        refFieldIndex < r.Values.Count ? r.Values[refFieldIndex] : ""),
+                    StringComparer.Ordinal);
+
+                for (int rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
+                {
+                    var row = table.Rows[rowIndex];
+                    if (fieldIndex >= row.Values.Count)
                         continue;
-                    }
-                    var refFieldIndex = refTable.Fields.FindIndex(f => f.Name.Equals(field.ReferenceField, StringComparison.OrdinalIgnoreCase));
-                    if (refFieldIndex < 0)
-                    {
-                        result.Errors.Add($"Table {table.Name} Field {field.Name}: Referenced field {field.ReferenceField} does not exist in table {field.ReferenceTable}");
+
+                    var value = row.Values[fieldIndex];
+                    if (string.IsNullOrEmpty(value))
                         continue;
-                    }
-                    // collect all referenced fields
-                    var refValues = new HashSet<string>(refTable.Rows.Select(r => refFieldIndex < r.Values.Count ? r.Values[refFieldIndex] : ""));
-                    // check all fields in the table
-                    for (int rowIndex = 0; rowIndex < table.Rows.Count; rowIndex++)
+
+                    if (!refValues.Contains(value))
                     {
-                        var row = table.Rows[rowIndex];
-                        if (fieldIndex < row.Values.Count)
-                        {
-                            var value = row.Values[fieldIndex];
-                            // Only validate non-empty values for foreign key references
-                            // Empty strings are valid for string fields
-                            if (!string.IsNullOrEmpty(value) && !refValues.Contains(value))
-                            {
-                                result.Errors.Add($"Table {table.Name} Row {rowIndex + 2} Col {fieldIndex + 1}: Field {field.Name} value '{value}' not found in {field.ReferenceTable}.{field.ReferenceField}");
-                            }
-                        }
+                        result.Errors.Add(
+                            $"[{table.Name}] Excel row {ExcelDataRow(rowIndex)}, col {fieldIndex + 1} ({field.Name}): value '{value}' not found in {field.ReferenceTable}.{field.ReferenceField}");
                     }
                 }
             }
@@ -321,4 +296,4 @@ public class ValidationResult
 {
     public bool IsValid => Errors.Count == 0;
     public List<string> Errors { get; set; } = new();
-} 
+}
