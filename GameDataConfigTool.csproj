@@ -5,12 +5,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <AssemblyTitle>Game Data Tool</AssemblyTitle>
-    <AssemblyDescription>Standalone Game Data Configuration Tool</AssemblyDescription>
-    <AssemblyCompany>GameDev</AssemblyCompany>
-    <AssemblyProduct>GameDataConfigTool</AssemblyProduct>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyTitle>GameDataConfigTool</AssemblyTitle>
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -31,9 +26,4 @@
     </None>
   </ItemGroup>
 
-  <!-- Exclude files under Unity folder -->
-  <ItemGroup>
-    <Compile Remove="Unity\**\*" />
-  </ItemGroup>
-
-</Project> 
+</Project>

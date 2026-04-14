@@ -1,181 +1,175 @@
-using GameDataTool.Core.Configuration;
-using GameDataTool.Core.Logging;
-using GameDataTool.Parsers;
-using GameDataTool.Generators;
+using GameDataTool.Core;
+using GameDataTool.Generation;
+using GameDataTool.Parsing;
+using GameDataTool.Validation;
 
 namespace GameDataTool;
 
 static class Program
 {
-    static async Task Main(string[] args)
+    static int Main(string[] args)
     {
+        if (args.Contains("--help") || args.Contains("-h")) { ShowHelp(); return 0; }
+
         try
         {
-            Console.WriteLine();
-            Console.WriteLine("=== Game Data Tool ===");
-            Console.WriteLine("Excel → validated binary / JSON / C# for Unity");
-            Console.WriteLine();
+            Console.WriteLine("\n=== Game Data Tool ===\n");
 
-            if (args.Contains("--help") || args.Contains("-h"))
-            {
-                ShowHelp();
-                return;
-            }
+            var profileOverride = ParseArg(args, "--profile");
+            Log.Init(false);
+            var cfg = ToolConfig.Load(profileOverride);
 
-            if (!Directory.Exists("excels") || !Directory.GetFiles("excels", "*.xlsx").Any())
-            {
-                Console.WriteLine("No Excel files found. Add .xlsx files under excels/ and run again.");
-                return;
-            }
+            var projectRoot = ToolConfig.GetProjectRoot();
+            var jsonPath    = cfg.ResolveOutputPath(cfg.OutputPaths.Json);
+            var binaryPath  = cfg.ResolveOutputPath(cfg.OutputPaths.Binary);
+            var codePath    = cfg.ResolveOutputPath(cfg.OutputPaths.Code);
 
-            var config = await ConfigurationManager.LoadAsync();
-            Logger.Initialize(config.Logging.Level, config.Logging.OutputToFile);
+            Log.Info($"Project root: {projectRoot}");
 
-            var cwd = Directory.GetCurrentDirectory();
-            var jsonOutputPath = Path.GetFullPath(config.OutputPaths.Json, cwd);
-            var binaryOutputPath = Path.GetFullPath(config.OutputPaths.Binary, cwd);
-            var codeOutputPath = Path.GetFullPath(config.OutputPaths.Code, cwd);
+            if (cfg.CleanBeforeGenerate) CleanOutputs(cfg, jsonPath, binaryPath, codePath);
 
-            EnsureOutputDirectories(config, jsonOutputPath, binaryOutputPath, codeOutputPath);
+            // ─── Parse ──────────────────────────────────────
 
-            if (config.CleanOutputsBeforeGenerate)
-            {
-                if (config.Generators.EnableJson)
-                    TryCleanOutputDirectory(jsonOutputPath, "JSON output");
-                if (config.Generators.EnableBinary)
-                    TryCleanOutputDirectory(binaryOutputPath, "binary output");
-                if (config.Generators.EnableCode)
-                    TryCleanOutputDirectory(codeOutputPath, "code output");
-            }
-
-            Logger.Info("Processing Excel data...");
-
-            var excelParser = new ExcelParser();
-            var data = await excelParser.ParseAsync(config.ExcelPath, config.EnumPath);
+            Log.Info("Parsing...");
+            var parser = new ExcelParser();
+            var data   = parser.Parse(cfg.ExcelPath, cfg.EnumPath);
 
             if (data.Tables.Count == 0 && data.Enums.Count == 0)
             {
-                Console.WriteLine("No data tables or enum files were produced. Check excels/ and enumPath in settings.");
-                return;
+                Console.WriteLine("No tables or enums found. Add .xlsx files to excels/ and run again.");
+                return 1;
             }
 
-            var validator = new DataValidator();
-            var validationResult = await validator.ValidateAsync(data, config.Validation);
+            // ─── Validate ───────────────────────────────────
 
-            if (!validationResult.IsValid)
+            Log.Info("Validating...");
+            var errors = new DataValidator().Validate(data, cfg.Validation);
+            if (errors.Count > 0)
             {
-                Console.WriteLine($"Validation failed ({validationResult.Errors.Count} issue(s)):");
-                foreach (var error in validationResult.Errors)
-                    Console.WriteLine($"  - {error}");
-                Logger.Error("Build stopped: validation errors.");
-                Environment.Exit(1);
+                Console.WriteLine($"\nValidation failed ({errors.Count} errors):");
+                foreach (var e in errors) Console.WriteLine($"  - {e}");
+                return 1;
             }
 
-            Logger.Info("Validation passed.");
+            Log.Info("Validation passed.\n");
+
+            // ─── Generate ───────────────────────────────────
+
+            var templateDir = FindTemplateDir();
+            var te = new TemplateEngine(templateDir);
+            var t0 = DateTime.UtcNow;
+
+            if (cfg.Generators.EnableJson)
+            {
+                Directory.CreateDirectory(jsonPath);
+                JsonGenerator.Generate(data, jsonPath);
+            }
+
+            if (cfg.Generators.EnableBinary)
+            {
+                Directory.CreateDirectory(binaryPath);
+                BinaryGenerator.Generate(data, binaryPath);
+            }
+
+            if (cfg.Generators.EnableCode)
+            {
+                Directory.CreateDirectory(codePath);
+                var lang = cfg.CodeGeneration.Language.ToLowerInvariant();
+                switch (lang)
+                {
+                    case "csharp" or "cs":
+                        new CSharpCodeGenerator(te, cfg.CodeGeneration.Namespace)
+                            .Generate(data, codePath, cfg.CodeGeneration.GenerateEnum);
+                        break;
+                    case "typescript" or "ts":
+                        new TypeScriptCodeGenerator(te)
+                            .Generate(data, codePath, cfg.CodeGeneration.GenerateEnum);
+                        break;
+                    default:
+                        Log.Warn($"Unknown language '{lang}', skipping code generation.");
+                        break;
+                }
+            }
+
+            var ms = (DateTime.UtcNow - t0).TotalMilliseconds;
+            Console.WriteLine($"\nDone in {ms:F0} ms.");
+            if (cfg.Generators.EnableJson)   Console.WriteLine($"  JSON:   {jsonPath}");
+            if (cfg.Generators.EnableBinary) Console.WriteLine($"  Binary: {binaryPath}");
+            if (cfg.Generators.EnableCode)   Console.WriteLine($"  Code:   {codePath}");
             Console.WriteLine();
-
-            var generator = new OutputGenerator();
-            var startTime = DateTime.UtcNow;
-
-            Console.WriteLine("Generating outputs...");
-            if (config.Generators.EnableJson)
-                await generator.GenerateJsonAsync(data, jsonOutputPath);
-            if (config.Generators.EnableBinary)
-                await generator.GenerateBinaryAsync(data, binaryOutputPath);
-            if (config.Generators.EnableCode)
-                await generator.GenerateCodeAsync(data, codeOutputPath, config.CodeGeneration);
-
-            var duration = DateTime.UtcNow - startTime;
-
-            Console.WriteLine();
-            Console.WriteLine($"Done in {duration.TotalMilliseconds:F0} ms.");
-            if (config.Generators.EnableJson)
-                Console.WriteLine($"  JSON:    {jsonOutputPath}");
-            if (config.Generators.EnableBinary)
-                Console.WriteLine($"  Binary:  {binaryOutputPath}");
-            if (config.Generators.EnableCode)
-                Console.WriteLine($"  Code:    {codeOutputPath}");
-            Console.WriteLine();
-
-            Logger.Info($"Generation finished in {duration.TotalMilliseconds:F0} ms.");
-        }
-        catch (FileNotFoundException ex)
-        {
-            Console.WriteLine($"File not found: {ex.Message}");
-            Logger.Error(ex.Message);
-            Environment.Exit(1);
+            return 0;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"Error: {ex.Message}");
-            Logger.Error(ex.Message);
-            if (ex.InnerException != null)
-            {
-                Console.WriteLine($"  {ex.InnerException.Message}");
-                Logger.Error(ex.InnerException.Message);
-            }
-            Environment.Exit(1);
+            if (ex.InnerException != null) Console.WriteLine($"  {ex.InnerException.Message}");
+            return 1;
+        }
+        finally
+        {
+            Log.Dispose();
         }
     }
 
-    private static void EnsureOutputDirectories(
-        ToolConfiguration config,
-        string jsonPath,
-        string binaryPath,
-        string codePath)
+    private static string FindTemplateDir()
     {
-        var paths = new List<string>();
-        if (config.Generators.EnableJson)
-            paths.Add(jsonPath);
-        if (config.Generators.EnableBinary)
-            paths.Add(binaryPath);
-        if (config.Generators.EnableCode)
-            paths.Add(codePath);
-
-        foreach (var path in paths)
+        var candidates = new[]
         {
-            if (!Directory.Exists(path))
-                Directory.CreateDirectory(path);
-        }
+            Path.Combine(Directory.GetCurrentDirectory(), "templates"),
+            Path.Combine(AppContext.BaseDirectory, "templates"),
+        };
+
+        foreach (var c in candidates)
+            if (Directory.Exists(c)) return c;
+
+        throw new DirectoryNotFoundException(
+            "templates/ directory not found. Run from repo root or ensure templates/ is next to the executable.");
     }
 
-    /// <summary>Deletes files and subfolders except <c>ext</c> (hand-written partials).</summary>
-    private static void TryCleanOutputDirectory(string path, string label)
+    private static void CleanOutputs(ToolConfig cfg, string jsonPath, string binaryPath, string codePath)
     {
-        if (!Directory.Exists(path))
-            return;
+        if (cfg.Generators.EnableJson)   CleanDir(jsonPath);
+        if (cfg.Generators.EnableBinary) CleanDir(binaryPath);
+        if (cfg.Generators.EnableCode)   CleanDir(codePath);
+    }
 
-        try
+    private static void CleanDir(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        foreach (var d in Directory.GetDirectories(path))
         {
-            foreach (var dir in Directory.GetDirectories(path))
-            {
-                if (string.Equals(Path.GetFileName(dir), "ext", StringComparison.OrdinalIgnoreCase))
-                    continue;
-                Directory.Delete(dir, recursive: true);
-            }
-
-            foreach (var file in Directory.GetFiles(path))
-                File.Delete(file);
-
-            Console.WriteLine($"Cleaned {label}: {path}");
+            if (Path.GetFileName(d).Equals("ext", StringComparison.OrdinalIgnoreCase)) continue;
+            Directory.Delete(d, true);
         }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Warning: could not clean {label} ({path}): {ex.Message}");
-        }
+        foreach (var f in Directory.GetFiles(path)) File.Delete(f);
+    }
+
+    private static string? ParseArg(string[] args, string key)
+    {
+        for (var i = 0; i < args.Length - 1; i++)
+            if (args[i].Equals(key, StringComparison.OrdinalIgnoreCase))
+                return args[i + 1];
+        return null;
     }
 
     private static void ShowHelp()
     {
-        Console.WriteLine("Usage:");
-        Console.WriteLine("  dotnet run");
-        Console.WriteLine("  dotnet run -- --help");
-        Console.WriteLine();
-        Console.WriteLine("Layout:");
-        Console.WriteLine("  config/settings.json  — paths, toggles, namespace");
-        Console.WriteLine("  excels/*.xlsx         — one workbook per table (first sheet only)");
-        Console.WriteLine("  excels/<enumPath>/    — enum workbooks");
-        Console.WriteLine();
-        Console.WriteLine("Run from the tool root so relative paths in settings resolve correctly.");
+        Console.WriteLine(@"Usage:  dotnet run [-- --profile <name>] [-- --help]
+
+Place this tool directory inside your project root:
+  MyProject/
+    GameDataConfig/         <- this tool (run dotnet run here)
+      excels/*.xlsx         <- data tables
+      config/profile.json   <- { ""active"": ""cocos"" }
+      config/cocos.json     <- Cocos pipeline (TS + JSON)
+      config/unity.json     <- Unity pipeline (C# + binary)
+      templates/            <- code generation templates
+    assets/                 <- project assets (auto-discovered via parent dir)
+
+outputPaths in config are relative to the PROJECT ROOT (parent of this tool dir).
+excelPath / enumPath are relative to this tool dir.
+
+Options:
+  --profile <name>   Override active profile (e.g. --profile unity)");
     }
 }

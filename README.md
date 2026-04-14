@@ -1,131 +1,185 @@
 # GameDataConfigTool
 
-**.NET 6** command-line tool: **Excel (`.xlsx`) → validated outputs** — compact **binary** for runtime, optional **JSON**, and **C#** types plus a **Unity-friendly** loader pattern (`BaseConfigData<T>`, `GameDataManager`). Validation runs **before** any file is written; failure exits with a non-zero code (CI-friendly).
+**.NET 6** CLI tool: **Excel → validated binary / JSON / C# or TypeScript** — strongly-typed, zero-reflection runtime code.
 
 **Author:** [Yuankun Huang](https://github.com/YuankunHuang)
 
 ---
 
-## What it does
+## Pipeline
 
-| Stage | Responsibility |
-|--------|------------------|
-| **Parse** | Read data tables and enum workbooks ([EPPlus](https://github.com/EPPlusSoftware/EPPlus)). |
-| **Validate** | Types, non-nullable cells, enums, foreign keys, duplicate `id`, field names. |
-| **Generate** | `*.data` + `index.json`, optional `*.json`, and C# (`Enums.cs`, `*Config.cs`, `*Data`, `BaseConfigData.cs`, `GameDataManager.cs`). |
-
-Hand-written code lives in **`ext/`** partials; those files are **not overwritten** after the first creation.
+| Stage | What happens |
+|-------|-------------|
+| **Parse** | Read `.xlsx` tables and enums via EPPlus; values are strongly-typed at parse time (no string round-trips). |
+| **Validate** | Types, ranges, non-nullable, enums, foreign keys, duplicate IDs, field names. Fails fast with non-zero exit. |
+| **Generate** | Binary `.data`, optional JSON, and **C# or TypeScript** code from `.template` files. |
 
 ---
 
-## Layout & conventions
+## Project structure
 
-**Run from the repository root** so `excels/`, `config/settings.json`, and relative `outputPaths` resolve correctly.
-
-### Workbooks
-
-- **Tables:** one `.xlsx` per table in `excels/` (top level only, **first sheet**). Row 1 = headers, row 2+ = data.
-- **Enums:** `.xlsx` files under `excels/<enumPath>/` (e.g. `excels/EnumTypes/`). Row 1 = header; columns: name, int value, optional description.
-
-### Primary key
-
-- **Column A must be `id|int`.** It cannot use `|nullable`.
-- Duplicate **`id`** values are rejected.
-- Generated **`GetById`** indexes on the `Id` property (same convention).
-
-### Column header
-
-`FieldName|Type` or `FieldName|Type|nullable`
-
-| Part | Meaning |
-|------|---------|
-| **FieldName** | Becomes the C# property (PascalCase). |
-| **Type** | See [Type syntax](#type-syntax) below. |
-| **nullable** (optional) | Blank cells are allowed and are filled with the **type default** before validation and export (`0` / `false` / `""` / `0001-01-01 00:00:00` for `datetime` → `DateTime.MinValue`). |
-
-If **`enforceNonNullableColumns`** is on in settings, any column **without** `|nullable` must have a non-empty value (after trim). Non-empty values are checked against the declared type.
-
-Header **cell comments** become **XML documentation** on the generated properties.
-
-### Type syntax
-
-| Pattern | Meaning |
-|---------|---------|
-| `int`, `long`, `float`, `string`, `bool`, `datetime` | Scalars (`date` → `datetime`). Unknown names are errors. |
-| `enum(EnumTypeName)` | Integer enum; cell may be a number or an enum member name from the enum workbook. |
-| `int^Range(min,max)` | For `int`: value in **[min, max)** (inclusive min, exclusive max). |
-| `int^id(RefTable)` | Foreign key: value must exist in the **`id`** column of the data table whose workbook is named `RefTable`. |
+```
+src/
+  Program.cs                  Entry point
+  Core/
+    ToolConfig.cs              Settings model + loader + validation
+    Log.cs                     Minimal logger (file handle properly disposed)
+    Naming.cs                  PascalCase / camelCase utilities
+  Models/
+    FieldType.cs               Type enum
+    FieldTypeInfo.cs           Parsed type declaration (record)
+    Field.cs                   Column definition
+    CellValue.cs               Strongly-typed cell (struct, no boxing for primitives)
+    DataRow.cs / DataTable.cs  Row and table models
+    EnumType.cs / EnumValue.cs Enum models
+    GameData.cs                Top-level container
+  Parsing/
+    TypeParser.cs              Column type syntax parser
+    ExcelParser.cs             Excel → GameData (synchronous, honest API)
+  Validation/
+    DataValidator.cs           All validation rules
+  Generation/
+    TemplateEngine.cs          Loads .template files, placeholder replacement
+    JsonGenerator.cs           GameData → .json
+    BinaryGenerator.cs         GameData → .data + index.json
+    CSharpCodeGenerator.cs     GameData → .cs (direct assignment, zero reflection)
+    TypeScriptCodeGenerator.cs GameData → .ts (interfaces + typed accessors)
+templates/
+  csharp/                      C# code generation templates
+  typescript/                  TypeScript code generation templates
+config/
+  settings.json                Tool configuration
+```
 
 ---
 
-## Requirements
+## Key improvements over v1
 
-- [.NET 6 SDK](https://dotnet.microsoft.com/download/dotnet/6.0)
-- [EPPlus](https://www.nuget.org/packages/EPPlus) (bundled via NuGet). **Check [licensing](https://epplussoftware.com/developers/licensenotice)** for commercial products.
-
-Default publish profile targets **self-contained `win-x64`**; use `dotnet publish -r <RID>` for other platforms.
+| Before | After |
+|--------|-------|
+| 1041-line `OutputGenerator` with `AppendLine` string concatenation | Template files + dedicated generators per language |
+| Runtime reflection (`PropertyInfo.SetValue`) in generated loader | Direct property assignment in generated code — **zero reflection** |
+| Fake async (`Task.FromResult`) | Honest synchronous API |
+| `List<string>` data model, triple `TryParse` | `CellValue` struct with typed value at parse time |
+| 7-element `ValueTuple` from `ParseFieldType` | `FieldTypeInfo` record |
+| `Logger` file handle leak | `Log.Dispose()` in `finally` block |
+| C# only | **C# + TypeScript** via `codeGeneration.language` |
 
 ---
 
 ## Quick start
 
-1. Add table `.xlsx` files under **`excels/`** and enums under **`excels/<enumPath>/`**.
-2. Adjust **`config/settings.json`** (`outputPaths`, `codeGeneration.namespace`, toggles).
-3. Execute:
+1. Place this tool directory inside your project root:
 
-   ```bash
-   dotnet build GameDataConfigTool.sln
-   dotnet run --project GameDataConfigTool.csproj
-   ```
+```
+MyProject/                          ← project root (auto-detected)
+  GameDataConfig/                   ← this tool
+    excels/
+      BrushConfig.xlsx
+      EnumTypes/BrushType.xlsx
+    config/
+      profile.json                  ← { "active": "cocos" }
+      cocos.json                    ← TS + JSON pipeline
+      unity.json                    ← C# + binary pipeline
+    templates/
+  assets/                           ← project assets (Cocos / Unity)
+```
 
-   On Windows, **`build.bat`** builds and runs (expects at least one `.xlsx` in `excels/`).
+2. `outputPaths` in config are **relative to the project root** (parent of this tool dir), not the tool dir itself. So `"assets/resources/data/"` resolves to `MyProject/assets/resources/data/`.
 
-4. **`dotnet run -- --help`** — CLI help.
+3. Run from the tool directory:
 
-Sample paths in `settings.json` point at a sibling Unity tree (`../Assets/...`); change them to match your project.
+```bash
+cd GameDataConfig
+dotnet run                          # uses active profile from profile.json
+dotnet run -- --profile unity       # override: use config/unity.json
+dotnet run -- --profile cocos       # override: use config/cocos.json
+```
 
 ---
 
-## Configuration (`config/settings.json`)
+## Excel conventions
+
+### Header format
+
+`FieldName|Type` or `FieldName|Type|nullable`
+
+- **Column A** must be `id|int` (non-nullable primary key).
+- Cell **comments** become doc comments on generated properties.
+
+### Type syntax
+
+| Pattern | Meaning |
+|---------|---------|
+| `int`, `long`, `float`, `string`, `bool`, `datetime` | Scalars |
+| `enum(EnumTypeName)` | Enum (cell = number or member name) |
+| `int^Range(min,max)` | Range check `[min, max)` |
+| `int^id(RefTable)` | Foreign key to another table's `id` |
+
+---
+
+## Profile system
+
+The tool uses a two-layer config:
+
+1. **`config/profile.json`** — selects which pipeline is active:
+   ```json
+   { "active": "cocos" }
+   ```
+2. **`config/<name>.json`** — full pipeline config (one per engine/project).
+
+Profile resolution order:
+1. `--profile <name>` CLI argument (highest priority)
+2. `profile.json` → `active` field
+3. Fallback → `config/settings.json`
+
+## Pipeline config options
 
 | Key | Purpose |
 |-----|---------|
-| `excelPath` | Folder containing table workbooks (default `excels/`). |
-| `enumPath` | Subfolder under `excelPath` for enum workbooks, or an absolute path. |
-| `cleanOutputsBeforeGenerate` | If `true`, clears each **enabled** output directory before writing (always keeps an `ext/` subfolder). Default in code: `true` if omitted. |
-| `outputPaths.json` / `binary` / `code` | Output roots; may use `../` relative to the tool root. |
-| `generators` | `enableJson`, `enableBinary`, `enableCode`. |
-| `codeGeneration` | `namespace`, `language`, `generateEnum`. |
-| `validation.enableTypeCheck` | Type / range checks on non-empty cells. |
-| `validation.enforceNonNullableColumns` | Enforce non-empty cells for columns without `|nullable`. |
-| `logging` | `level`, `outputToFile`. |
+| `excelPath` | Table workbooks folder (default `excels/`) |
+| `enumPath` | Enum subfolder under `excelPath` |
+| `cleanBeforeGenerate` | Clear output dirs before writing (preserves `ext/`) |
+| `outputPaths.json/binary/code` | Output directories (relative to tool root) |
+| `generators.enableJson/Binary/Code` | Toggle each output |
+| `codeGeneration.namespace` | C# namespace (required for C#, ignored for TS) |
+| `codeGeneration.language` | `csharp` or `typescript` |
+| `validation.*` | Type checks, non-nullable enforcement |
 
 ---
 
-## Unity (generated code)
+## Generated code
 
-- **`XXXData`** — Row shape.
-- **`XXXConfig` : `BaseConfigData<XXXData>`** — `Initialize()` loads `StreamingAssets/ConfigData/<Table>.data`; optional **`PostInitialize`** in `ext/`.
-- **`GameDataManager`** — Calls each config’s `Initialize` (reflection on non-WebGL; async path on WebGL player).
-- Data is held in **static** collections until **`Reload`** or domain unload; there is no automatic unload API.
+### C# (zero-reflection loader)
 
----
-
-## Source layout
-
+```csharp
+// Generated: direct assignment, no PropertyInfo.SetValue
+var item = new MonsterData
+{
+    Id   = r.ReadInt32(),
+    Name = r.ReadString(),
+    Hp   = r.ReadSingle(),
+};
 ```
-src/Program.cs           Entry
-src/ExcelParser.cs       Sheets → model; defaults for nullable cells
-src/DataValidator.cs     Rules
-src/OutputGenerator.cs   Writers + C# templates
-src/Configuration.cs     Settings
-src/FieldValueDefaults.cs Shared default strings (e.g. datetime min)
-src/Logger.cs
-config/settings.json
+
+### TypeScript
+
+```typescript
+export interface MonsterData {
+    readonly id: number;
+    readonly name: string;
+    readonly hp: number;
+}
+
+export const MonsterConfig = {
+    initialize(rows: MonsterData[]): void { ... },
+    getById(id: number): MonsterData | undefined { ... },
+    getAll(): readonly MonsterData[] { ... },
+};
 ```
 
 ---
 
 ## License
 
-Ship a **`LICENSE`** if you redistribute the tool. Honor **EPPlus** and other NuGet package terms.
+Honor [EPPlus licensing](https://epplussoftware.com/developers/licensenotice) for commercial use.

@@ -1,0 +1,24 @@
+{
+  "excelPath": "excels/",
+  "enumPath": "EnumTypes",
+  "cleanBeforeGenerate": true,
+  "outputPaths": {
+    "json": "assets/resources/data/",
+    "binary": "output/binary/",
+    "code": "assets/scripts/configs/"
+  },
+  "generators": {
+    "enableJson": true,
+    "enableBinary": false,
+    "enableCode": true
+  },
+  "codeGeneration": {
+    "namespace": "",
+    "language": "typescript",
+    "generateEnum": true
+  },
+  "validation": {
+    "enableTypeCheck": true,
+    "enforceNonNullableColumns": true
+  }
+}

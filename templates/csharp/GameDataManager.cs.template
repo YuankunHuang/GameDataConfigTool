@@ -1,0 +1,21 @@
+namespace {{NAMESPACE}}
+{
+    /// <summary>Initializes all config tables. Call once at startup.</summary>
+    public static class GameDataManager
+    {
+        private static bool _initialized;
+
+        public static void Initialize(string dataDir)
+        {
+            if (_initialized) return;
+{{INIT_CALLS}}
+            _initialized = true;
+        }
+
+        public static void Reload(string dataDir)
+        {
+            _initialized = false;
+            Initialize(dataDir);
+        }
+    }
+}

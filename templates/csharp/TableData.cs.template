@@ -1,0 +1,21 @@
+using System;
+
+namespace {{NAMESPACE}}
+{
+    public sealed class {{TABLE_NAME}}Data
+    {
+{{PROPERTIES}}
+    }
+
+    public sealed class {{TABLE_NAME}}Config
+    {
+        private static {{TABLE_NAME}}Data[]? _all;
+        private static Dictionary<int, {{TABLE_NAME}}Data>? _byId;
+
+{{LOADER}}
+
+        public static {{TABLE_NAME}}Data? GetById(int id) => _byId != null && _byId.TryGetValue(id, out var v) ? v : null;
+        public static {{TABLE_NAME}}Data[] GetAll() => _all ?? Array.Empty<{{TABLE_NAME}}Data>();
+        public static int Count => _all?.Length ?? 0;
+    }
+}

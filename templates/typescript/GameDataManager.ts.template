@@ -1,0 +1,15 @@
+{{IMPORTS}}
+
+let _initialized = false;
+
+export const GameDataManager = {
+    initialize(loader: (tableName: string) => unknown[]): void {
+        if (_initialized) return;
+{{INIT_CALLS}}
+        _initialized = true;
+    },
+    reload(loader: (tableName: string) => unknown[]): void {
+        _initialized = false;
+        this.initialize(loader);
+    },
+};

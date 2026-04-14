@@ -1,0 +1,7 @@
+namespace {{NAMESPACE}}
+{
+    /// <summary>Hand-written extensions for {{TABLE_NAME}}Config. NOT overwritten by the tool.</summary>
+    public sealed partial class {{TABLE_NAME}}Config
+    {
+    }
+}

@@ -1,0 +1,20 @@
+export interface {{TABLE_NAME}}Data {
+{{PROPERTIES}}
+}
+
+const _all: {{TABLE_NAME}}Data[] = [];
+const _byId = new Map<number, {{TABLE_NAME}}Data>();
+
+export const {{TABLE_NAME}}Config = {
+    initialize(rows: {{TABLE_NAME}}Data[]): void {
+        _all.length = 0;
+        _byId.clear();
+        for (const row of rows) {
+            _all.push(row);
+            _byId.set(row.id, row);
+        }
+    },
+    getById(id: number): {{TABLE_NAME}}Data | undefined { return _byId.get(id); },
+    getAll(): readonly {{TABLE_NAME}}Data[] { return _all; },
+    get count(): number { return _all.length; },
+};
