@@ -1,29 +1,66 @@
 {
-  "_comment": "Setup input. Run setup.bat/sh after editing. Paths here will be used to generate project-side config files and directory structure. Discard changes to this file after setup.",
+  "_comment": [
+    "Setup input. Edit this file, then run setup.bat/sh.",
+    "All paths (except projectRoot) are relative to the PROJECT ROOT.",
+    "projectRoot itself is relative to this tool directory.",
+    "After setup, discard changes to this file: git checkout -- ."
+  ],
 
+  "_projectRoot_comment": "Relative path from this tool directory to your project root. e.g. '../..' if tool is at MyProject/tools/ConfigTool/",
   "projectRoot": ".",
+
+  "_projectConfigPath_comment": "Where to generate the runtime config file (relative to project root).",
   "projectConfigPath": "config/configtool.json",
 
+  "_excelPath_comment": "Directory containing your .xlsx data tables (relative to project root).",
   "excelPath": "excels/",
+
+  "_enumPath_comment": "Subdirectory under excelPath for enum .xlsx files.",
   "enumPath": "EnumTypes",
+
   "cleanBeforeGenerate": true,
+
+  "_outputPaths_comment": "Output directories (relative to project root). Only paths for enabled generators matter.",
   "outputPaths": {
     "json": "output/json/",
     "binary": "output/binary/",
     "code": "output/code/"
   },
+
+  "_generators_comment": "Toggle each output type. Disable what you don't need.",
   "generators": {
-    "enableJson": true,
+    "enableJson": false,
     "enableBinary": true,
     "enableCode": true
   },
+
+  "_codeGeneration_comment": "language: 'csharp' or 'typescript'. namespace: required for C#, leave empty for TS.",
   "codeGeneration": {
     "namespace": "GameData",
     "language": "csharp",
     "generateEnum": true
   },
+
   "validation": {
     "enableTypeCheck": true,
     "enforceNonNullableColumns": true
+  },
+
+  "_examples": {
+    "_comment": "Reference only. Copy the relevant section above and adjust.",
+    "unity (C# + binary)": {
+      "projectRoot": "../..",
+      "excelPath": "config/excels/",
+      "outputPaths": { "binary": "Assets/StreamingAssets/ConfigData/", "code": "Assets/Scripts/ConfigData/" },
+      "generators": { "enableJson": false, "enableBinary": true, "enableCode": true },
+      "codeGeneration": { "language": "csharp", "namespace": "GameData" }
+    },
+    "cocos (TypeScript + JSON)": {
+      "projectRoot": "../..",
+      "excelPath": "config/excels/",
+      "outputPaths": { "json": "assets/resources/data/", "code": "assets/scripts/configs/" },
+      "generators": { "enableJson": true, "enableBinary": false, "enableCode": true },
+      "codeGeneration": { "language": "typescript", "namespace": "" }
+    }
   }
 }

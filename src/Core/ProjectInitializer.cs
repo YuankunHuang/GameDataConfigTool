@@ -93,16 +93,17 @@ public static class ProjectInitializer
             return;
         }
 
-        // Copy all fields from setup.json except setup-specific metadata keys
+        // Copy all fields from setup.json except setup-only metadata keys
         var runtimeNode = new JsonObject();
         var metaKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            "projectRoot", "projectConfigPath", "_comment"
+            "projectRoot", "projectConfigPath"
         };
 
         foreach (var kv in setupNode.AsObject())
         {
             if (metaKeys.Contains(kv.Key)) continue;
+            if (kv.Key.StartsWith("_")) continue;
             // Re-parse the serialized value to get an independent copy (DeepClone is .NET 7+)
             var serialized = kv.Value?.ToJsonString() ?? "null";
             runtimeNode[kv.Key] = JsonNode.Parse(serialized);
