@@ -12,9 +12,6 @@ public sealed class ToolConfig
     public CodeGen     CodeGeneration { get; set; } = new();
     public Validation  Validation  { get; set; } = new();
 
-    private const string ProfilePath = "config/profile.json";
-    private const string ConfigDir   = "config";
-
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -33,27 +30,20 @@ public sealed class ToolConfig
 
     /// <summary>
     /// Returns the project root directory.
-    /// If set via --project-root, returns that path.
-    /// Otherwise returns the parent of CWD (backward compatible: tool lives in a subdirectory of the project).
+    /// Must be set via --project-root; throws if not configured.
     /// </summary>
     public static string GetProjectRoot()
     {
-        if (_projectRootOverride != null)
-            return _projectRootOverride;
-        var toolDir = Directory.GetCurrentDirectory();
-        return Path.GetFullPath(Path.Combine(toolDir, ".."));
+        return _projectRootOverride
+            ?? throw new InvalidOperationException("--project-root is required. Use the generated build_config script or pass --project-root explicitly.");
     }
 
     /// <summary>
-    /// Resolves excelPath to an absolute path.
-    /// If --project-root is set, resolves relative to projectRoot.
-    /// Otherwise resolves relative to CWD (backward compatible).
+    /// Resolves excelPath to an absolute path relative to projectRoot.
     /// </summary>
     public string ResolveExcelPath()
     {
-        if (_projectRootOverride != null)
-            return Path.GetFullPath(ExcelPath, _projectRootOverride);
-        return Path.GetFullPath(ExcelPath, Directory.GetCurrentDirectory());
+        return Path.GetFullPath(ExcelPath, GetProjectRoot());
     }
 
     /// <summary>
@@ -74,18 +64,11 @@ public sealed class ToolConfig
     }
 
     /// <summary>
-    /// Loads config via profile resolution:
-    ///   1. CLI override:  --profile cocos  →  config/cocos.json
-    ///   2. profile.json:  { "active": "cocos" }  →  config/cocos.json
-    ///   3. Fallback:      config/settings.json
-    ///
-    /// When configPath is provided directly (via --config), profile resolution is bypassed.
+    /// Loads config from the given file path (provided via --config).
     /// </summary>
-    public static ToolConfig Load(string? profileOverride = null, string? configPath = null)
+    public static ToolConfig Load(string configPath)
     {
-        var configFile = configPath != null
-            ? Path.GetFullPath(configPath)
-            : ResolveConfigFile(profileOverride ?? ReadActiveProfile());
+        var configFile = Path.GetFullPath(configPath);
 
         if (!File.Exists(configFile))
             throw new FileNotFoundException($"Config not found: {configFile}");
@@ -96,30 +79,8 @@ public sealed class ToolConfig
 
         cfg.Validate();
 
-        var label = configPath != null ? configPath : (profileOverride ?? "default");
-        Log.Info($"Profile: {label} ({configFile})");
+        Log.Info($"Config: {configFile}");
         return cfg;
-    }
-
-    private static string? ReadActiveProfile()
-    {
-        if (!File.Exists(ProfilePath)) return null;
-
-        var json = File.ReadAllText(ProfilePath);
-        using var doc = JsonDocument.Parse(json);
-        if (doc.RootElement.TryGetProperty("active", out var prop))
-            return prop.GetString();
-        return null;
-    }
-
-    private static string ResolveConfigFile(string? profileName)
-    {
-        if (!string.IsNullOrWhiteSpace(profileName))
-        {
-            var named = Path.Combine(ConfigDir, $"{profileName}.json");
-            if (File.Exists(named)) return named;
-        }
-        return Path.Combine(ConfigDir, "settings.json");
     }
 
     private void Validate()

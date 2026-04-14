@@ -25,24 +25,28 @@ static class Program
         {
             Console.WriteLine("\n=== Game Data Tool ===\n");
 
-            var profileOverride = ParseArg(args, "--profile");
-            var configPath      = ParseArg(args, "--config");
-            var projectRoot     = ParseArg(args, "--project-root");
+            var configPath  = ParseArg(args, "--config");
+            var projectRoot = ParseArg(args, "--project-root");
 
-            if (projectRoot != null)
-                ToolConfig.SetProjectRoot(projectRoot);
+            if (projectRoot == null || configPath == null)
+            {
+                Console.WriteLine("Error: --project-root and --config are required.");
+                Console.WriteLine("Use the generated build_config script, or run with --help for details.");
+                return 1;
+            }
+
+            ToolConfig.SetProjectRoot(projectRoot);
 
             Log.Init(false);
-            var cfg = ToolConfig.Load(profileOverride, configPath);
+            var cfg = ToolConfig.Load(configPath);
 
-            var resolvedProjectRoot = ToolConfig.GetProjectRoot();
             var excelFullPath = cfg.ResolveExcelPath();
             var enumFullPath  = cfg.ResolveEnumPath(excelFullPath);
             var jsonPath      = cfg.ResolveOutputPath(cfg.OutputPaths.Json);
             var binaryPath    = cfg.ResolveOutputPath(cfg.OutputPaths.Binary);
             var codePath      = cfg.ResolveOutputPath(cfg.OutputPaths.Code);
 
-            Log.Info($"Project root: {resolvedProjectRoot}");
+            Log.Info($"Project root: {ToolConfig.GetProjectRoot()}");
             Log.Info($"Excel path  : {excelFullPath}");
 
             if (cfg.CleanBeforeGenerate) CleanOutputs(cfg, jsonPath, binaryPath, codePath);
@@ -177,44 +181,30 @@ static class Program
   dotnet run [-- <options>]
 
 Options:
-  --profile <name>       Override active profile (e.g. --profile unity)
-  --config <path>        Load config from an external file (bypasses profile resolution)
-  --project-root <path>  Set project root; all paths in config are resolved relative to it
+  --project-root <path>  Set project root; all config paths are resolved relative to it
+  --config <path>        Path to the runtime config file (e.g. config/configtool.json)
   --setup                Run setup: generate project-side files from config/setup.json
   --help / -h            Show this help
 
-── Standalone usage (default) ──────────────────────────────────────────────────
-  Place this tool directory inside your project root:
-
-    MyProject/
-      GameDataConfig/           <- this tool (run dotnet run here)
-        excels/*.xlsx           <- data tables
-        config/profile.json     <- { ""active"": ""cocos"" }
-        config/cocos.json       <- Cocos pipeline (TS + JSON)
-        config/unity.json       <- Unity pipeline (C# + binary)
-        templates/
-
-  outputPaths in config are relative to the project root (parent of this tool dir).
-  excelPath is relative to this tool dir.
-
-── Submodule usage ──────────────────────────────────────────────────────────────
+── Setup (one-time) ────────────────────────────────────────────────────────────
   1. Add as submodule:
        git submodule add <url> tools/ConfigTool
 
-  2. Edit config/setup.json inside the tool to match your project layout.
+  2. Copy a preset or edit config/setup.json:
+       cp config/presets/unity.setup.json config/setup.json   # Unity
+       cp config/presets/cocos.setup.json config/setup.json   # Cocos Creator
 
-  3. Run setup:
+  3. Adjust projectRoot in setup.json, then run:
        setup.bat       (Windows)
        ./setup.sh      (macOS / Linux)
-
-     This generates in the project root:
-       - config/configtool.json    (runtime config)
-       - config/excels/            (excel directory)
-       - build_config.bat / .sh    (build scripts)
 
   4. Discard tool changes: git checkout -- tools/ConfigTool/
 
   5. Commit the generated files, then use build_config.bat to generate code.
+
+── Generated build script usage ────────────────────────────────────────────────
+  build_config.bat / .sh calls this tool with the correct arguments:
+    dotnet run -- --project-root . --config config/configtool.json
 
   All paths in configtool.json are relative to the project root.");
     }
