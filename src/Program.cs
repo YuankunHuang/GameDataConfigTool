@@ -11,20 +11,39 @@ static class Program
     {
         if (args.Contains("--help") || args.Contains("-h")) { ShowHelp(); return 0; }
 
+        if (args.Contains("--setup"))
+        {
+            try { return ProjectInitializer.Run(); }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Setup error: {ex.Message}");
+                return 1;
+            }
+        }
+
         try
         {
             Console.WriteLine("\n=== Game Data Tool ===\n");
 
             var profileOverride = ParseArg(args, "--profile");
+            var configPath      = ParseArg(args, "--config");
+            var projectRoot     = ParseArg(args, "--project-root");
+
+            if (projectRoot != null)
+                ToolConfig.SetProjectRoot(projectRoot);
+
             Log.Init(false);
-            var cfg = ToolConfig.Load(profileOverride);
+            var cfg = ToolConfig.Load(profileOverride, configPath);
 
-            var projectRoot = ToolConfig.GetProjectRoot();
-            var jsonPath    = cfg.ResolveOutputPath(cfg.OutputPaths.Json);
-            var binaryPath  = cfg.ResolveOutputPath(cfg.OutputPaths.Binary);
-            var codePath    = cfg.ResolveOutputPath(cfg.OutputPaths.Code);
+            var resolvedProjectRoot = ToolConfig.GetProjectRoot();
+            var excelFullPath = cfg.ResolveExcelPath();
+            var enumFullPath  = cfg.ResolveEnumPath(excelFullPath);
+            var jsonPath      = cfg.ResolveOutputPath(cfg.OutputPaths.Json);
+            var binaryPath    = cfg.ResolveOutputPath(cfg.OutputPaths.Binary);
+            var codePath      = cfg.ResolveOutputPath(cfg.OutputPaths.Code);
 
-            Log.Info($"Project root: {projectRoot}");
+            Log.Info($"Project root: {resolvedProjectRoot}");
+            Log.Info($"Excel path  : {excelFullPath}");
 
             if (cfg.CleanBeforeGenerate) CleanOutputs(cfg, jsonPath, binaryPath, codePath);
 
@@ -32,11 +51,11 @@ static class Program
 
             Log.Info("Parsing...");
             var parser = new ExcelParser();
-            var data   = parser.Parse(cfg.ExcelPath, cfg.EnumPath);
+            var data   = parser.Parse(excelFullPath, enumFullPath);
 
             if (data.Tables.Count == 0 && data.Enums.Count == 0)
             {
-                Console.WriteLine("No tables or enums found. Add .xlsx files to excels/ and run again.");
+                Console.WriteLine("No tables or enums found. Add .xlsx files to the excel directory and run again.");
                 return 1;
             }
 
@@ -154,22 +173,49 @@ static class Program
 
     private static void ShowHelp()
     {
-        Console.WriteLine(@"Usage:  dotnet run [-- --profile <name>] [-- --help]
-
-Place this tool directory inside your project root:
-  MyProject/
-    GameDataConfig/         <- this tool (run dotnet run here)
-      excels/*.xlsx         <- data tables
-      config/profile.json   <- { ""active"": ""cocos"" }
-      config/cocos.json     <- Cocos pipeline (TS + JSON)
-      config/unity.json     <- Unity pipeline (C# + binary)
-      templates/            <- code generation templates
-    assets/                 <- project assets (auto-discovered via parent dir)
-
-outputPaths in config are relative to the PROJECT ROOT (parent of this tool dir).
-excelPath / enumPath are relative to this tool dir.
+        Console.WriteLine(@"Usage:
+  dotnet run [-- <options>]
 
 Options:
-  --profile <name>   Override active profile (e.g. --profile unity)");
+  --profile <name>       Override active profile (e.g. --profile unity)
+  --config <path>        Load config from an external file (bypasses profile resolution)
+  --project-root <path>  Set project root; all paths in config are resolved relative to it
+  --setup                Run setup: generate project-side files from config/setup.json
+  --help / -h            Show this help
+
+── Standalone usage (default) ──────────────────────────────────────────────────
+  Place this tool directory inside your project root:
+
+    MyProject/
+      GameDataConfig/           <- this tool (run dotnet run here)
+        excels/*.xlsx           <- data tables
+        config/profile.json     <- { ""active"": ""cocos"" }
+        config/cocos.json       <- Cocos pipeline (TS + JSON)
+        config/unity.json       <- Unity pipeline (C# + binary)
+        templates/
+
+  outputPaths in config are relative to the project root (parent of this tool dir).
+  excelPath is relative to this tool dir.
+
+── Submodule usage ──────────────────────────────────────────────────────────────
+  1. Add as submodule:
+       git submodule add <url> tools/ConfigTool
+
+  2. Edit config/setup.json inside the tool to match your project layout.
+
+  3. Run setup:
+       setup.bat       (Windows)
+       ./setup.sh      (macOS / Linux)
+
+     This generates in the project root:
+       - config/configtool.json    (runtime config)
+       - config/excels/            (excel directory)
+       - build_config.bat / .sh    (build scripts)
+
+  4. Discard tool changes: git checkout -- tools/ConfigTool/
+
+  5. Commit the generated files, then use build_config.bat to generate code.
+
+  All paths in configtool.json are relative to the project root.");
     }
 }

@@ -11,12 +11,15 @@ public sealed class ExcelParser
         ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
     }
 
+    /// <summary>
+    /// Parses excel tables and enums.
+    /// Both paths must be absolute (resolved by caller via ToolConfig.ResolveExcelPath / ResolveEnumPath).
+    /// </summary>
     public GameData Parse(string excelPath, string enumPath)
     {
         var data = new GameData();
 
-        var enumDir = Path.IsPathRooted(enumPath) ? enumPath : Path.Combine(excelPath, enumPath);
-        ParseEnumTypes(data, enumDir);
+        ParseEnumTypes(data, enumPath);
         ParseDataTables(data, excelPath);
 
         return data;

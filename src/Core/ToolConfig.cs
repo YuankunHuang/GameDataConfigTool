@@ -20,16 +20,72 @@ public sealed class ToolConfig
         PropertyNameCaseInsensitive = true,
     };
 
+    private static string? _projectRootOverride;
+
+    /// <summary>
+    /// Set by --project-root CLI argument.
+    /// When set, excelPath and outputPaths are resolved relative to this directory.
+    /// </summary>
+    public static void SetProjectRoot(string projectRoot)
+    {
+        _projectRootOverride = Path.GetFullPath(projectRoot);
+    }
+
+    /// <summary>
+    /// Returns the project root directory.
+    /// If set via --project-root, returns that path.
+    /// Otherwise returns the parent of CWD (backward compatible: tool lives in a subdirectory of the project).
+    /// </summary>
+    public static string GetProjectRoot()
+    {
+        if (_projectRootOverride != null)
+            return _projectRootOverride;
+        var toolDir = Directory.GetCurrentDirectory();
+        return Path.GetFullPath(Path.Combine(toolDir, ".."));
+    }
+
+    /// <summary>
+    /// Resolves excelPath to an absolute path.
+    /// If --project-root is set, resolves relative to projectRoot.
+    /// Otherwise resolves relative to CWD (backward compatible).
+    /// </summary>
+    public string ResolveExcelPath()
+    {
+        if (_projectRootOverride != null)
+            return Path.GetFullPath(ExcelPath, _projectRootOverride);
+        return Path.GetFullPath(ExcelPath, Directory.GetCurrentDirectory());
+    }
+
+    /// <summary>
+    /// Resolves enumPath to an absolute path (under the resolved excelPath).
+    /// </summary>
+    public string ResolveEnumPath(string resolvedExcelPath)
+    {
+        if (Path.IsPathRooted(EnumPath)) return EnumPath;
+        return Path.Combine(resolvedExcelPath, EnumPath);
+    }
+
+    /// <summary>
+    /// Resolves an output sub-path relative to project root.
+    /// </summary>
+    public string ResolveOutputPath(string subPath)
+    {
+        return Path.GetFullPath(subPath, GetProjectRoot());
+    }
+
     /// <summary>
     /// Loads config via profile resolution:
     ///   1. CLI override:  --profile cocos  →  config/cocos.json
     ///   2. profile.json:  { "active": "cocos" }  →  config/cocos.json
     ///   3. Fallback:      config/settings.json
+    ///
+    /// When configPath is provided directly (via --config), profile resolution is bypassed.
     /// </summary>
-    public static ToolConfig Load(string? profileOverride = null)
+    public static ToolConfig Load(string? profileOverride = null, string? configPath = null)
     {
-        var profileName = profileOverride ?? ReadActiveProfile();
-        var configFile  = ResolveConfigFile(profileName);
+        var configFile = configPath != null
+            ? Path.GetFullPath(configPath)
+            : ResolveConfigFile(profileOverride ?? ReadActiveProfile());
 
         if (!File.Exists(configFile))
             throw new FileNotFoundException($"Config not found: {configFile}");
@@ -40,24 +96,9 @@ public sealed class ToolConfig
 
         cfg.Validate();
 
-        Log.Info($"Profile: {profileName ?? "default"} ({configFile})");
+        var label = configPath != null ? configPath : (profileOverride ?? "default");
+        Log.Info($"Profile: {label} ({configFile})");
         return cfg;
-    }
-
-    /// <summary>
-    /// Project root = parent of the tool directory.
-    /// outputPaths are resolved relative to project root.
-    /// excelPath / enumPath are resolved relative to tool directory (cwd).
-    /// </summary>
-    public static string GetProjectRoot()
-    {
-        var toolDir = Directory.GetCurrentDirectory();
-        return Path.GetFullPath(Path.Combine(toolDir, ".."));
-    }
-
-    public string ResolveOutputPath(string subPath)
-    {
-        return Path.GetFullPath(subPath, GetProjectRoot());
     }
 
     private static string? ReadActiveProfile()
