@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Unity best-practice preset.",
+    "Copy this file to config/setup.json, adjust projectRoot if needed, then run setup.bat/sh.",
+    "Pipeline: Excel -> C# code + binary data, loaded via BinaryReader (zero reflection)."
+  ],
+
+  "_projectRoot_comment": "Relative path from this tool directory to your Unity project root. Adjust to match your submodule location.",
+  "projectRoot": "../..",
+
+  "projectConfigPath": "config/configtool.json",
+
+  "excelPath": "config/excels/",
+  "enumPath": "EnumTypes",
+  "cleanBeforeGenerate": true,
+
+  "outputPaths": {
+    "json": "output/json/",
+    "binary": "Assets/StreamingAssets/ConfigData/",
+    "code": "Assets/Scripts/ConfigData/"
+  },
+
+  "generators": {
+    "enableJson": false,
+    "enableBinary": true,
+    "enableCode": true
+  },
+
+  "codeGeneration": {
+    "namespace": "GameData",
+    "language": "csharp",
+    "generateEnum": true
+  },
+
+  "validation": {
+    "enableTypeCheck": true,
+    "enforceNonNullableColumns": true
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "_comment": [
+    "Cocos Creator best-practice preset.",
+    "Copy this file to config/setup.json, adjust projectRoot if needed, then run setup.bat/sh.",
+    "Pipeline: Excel -> TypeScript code + JSON data, loaded via resources.load()."
+  ],
+
+  "_projectRoot_comment": "Relative path from this tool directory to your Cocos project root. Adjust to match your submodule location.",
+  "projectRoot": "../..",
+
+  "projectConfigPath": "config/configtool.json",
+
+  "excelPath": "config/excels/",
+  "enumPath": "EnumTypes",
+  "cleanBeforeGenerate": true,
+
+  "outputPaths": {
+    "json": "assets/resources/data/",
+    "binary": "output/binary/",
+    "code": "assets/scripts/configs/"
+  },
+
+  "generators": {
+    "enableJson": true,
+    "enableBinary": false,
+    "enableCode": true
+  },
+
+  "codeGeneration": {
+    "namespace": "",
+    "language": "typescript",
+    "generateEnum": true
+  },
+
+  "validation": {
+    "enableTypeCheck": true,
+    "enforceNonNullableColumns": true
+  }
+}

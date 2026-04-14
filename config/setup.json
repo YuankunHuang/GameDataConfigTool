@@ -3,7 +3,12 @@
     "Setup input. Edit this file, then run setup.bat/sh.",
     "All paths (except projectRoot) are relative to the PROJECT ROOT.",
     "projectRoot itself is relative to this tool directory.",
-    "After setup, discard changes to this file: git checkout -- ."
+    "After setup, discard changes to this file: git checkout -- .",
+    "",
+    "Best-practice presets available in config/presets/:",
+    "  unity.setup.json   - C# + binary (BinaryReader, zero reflection)",
+    "  cocos.setup.json   - TypeScript + JSON (resources.load)",
+    "To use a preset: copy it over this file, adjust projectRoot, run setup."
   ],
 
   "_projectRoot_comment": "Relative path from this tool directory to your project root. e.g. '../..' if tool is at MyProject/tools/ConfigTool/",
@@ -29,7 +34,7 @@
 
   "_generators_comment": "Toggle each output type. Disable what you don't need.",
   "generators": {
-    "enableJson": false,
+    "enableJson": true,
     "enableBinary": true,
     "enableCode": true
   },
@@ -44,23 +49,5 @@
   "validation": {
     "enableTypeCheck": true,
     "enforceNonNullableColumns": true
-  },
-
-  "_examples": {
-    "_comment": "Reference only. Copy the relevant section above and adjust.",
-    "unity (C# + binary)": {
-      "projectRoot": "../..",
-      "excelPath": "config/excels/",
-      "outputPaths": { "binary": "Assets/StreamingAssets/ConfigData/", "code": "Assets/Scripts/ConfigData/" },
-      "generators": { "enableJson": false, "enableBinary": true, "enableCode": true },
-      "codeGeneration": { "language": "csharp", "namespace": "GameData" }
-    },
-    "cocos (TypeScript + JSON)": {
-      "projectRoot": "../..",
-      "excelPath": "config/excels/",
-      "outputPaths": { "json": "assets/resources/data/", "code": "assets/scripts/configs/" },
-      "generators": { "enableJson": true, "enableBinary": false, "enableCode": true },
-      "codeGeneration": { "language": "typescript", "namespace": "" }
-    }
   }
 }

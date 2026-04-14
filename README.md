@@ -97,24 +97,21 @@ git submodule update --init
 
 **Step 2 — Edit `tools/ConfigTool/config/setup.json`**
 
-Set `projectRoot` (relative to the tool directory) and all path/language settings:
+Best-practice presets are provided in `config/presets/`:
 
-```json
-{
-  "projectRoot": "../..",
-  "projectConfigPath": "config/configtool.json",
+| Preset | Pipeline | File |
+|--------|----------|------|
+| Unity | C# + binary (BinaryReader, zero reflection) | `config/presets/unity.setup.json` |
+| Cocos Creator | TypeScript + JSON (resources.load) | `config/presets/cocos.setup.json` |
 
-  "excelPath": "config/excels/",
-  "enumPath": "EnumTypes",
-  "outputPaths": {
-    "json": "output/json/",
-    "binary": "Assets/StreamingAssets/ConfigData/",
-    "code": "Assets/Scripts/ConfigData/"
-  },
-  "generators": { "enableJson": false, "enableBinary": true, "enableCode": true },
-  "codeGeneration": { "language": "csharp", "namespace": "GameData" }
-}
+Copy the matching preset over `setup.json`, or edit `setup.json` directly:
+
+```bash
+# Example: use the Unity preset
+cp tools/ConfigTool/config/presets/unity.setup.json tools/ConfigTool/config/setup.json
 ```
+
+Then adjust `projectRoot` to match your submodule location (e.g. `"../.."` if tool is at `MyProject/tools/ConfigTool/`).
 
 All `outputPaths` and `excelPath` are relative to the **project root**.
 
